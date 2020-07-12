@@ -1,42 +1,78 @@
 //! I2C
-use hal::blocking::i2c::{Read, Write, WriteRead};
 
-use crate::gpio::gpiob::{PB10, PB11, PB8, PB9};
-use crate::gpio::{AltMode, OpenDrain, Output};
-use crate::prelude::*;
-use crate::rcc::Rcc;
-use crate::stm32::{I2C1, I2C2};
-use crate::time::Hertz;
+use cast::u8;
+use stm32::{I2C1, I2C2};
 
-/// I2C abstraction
+use gpio::gpiob::{PB6, PB7, PB8, PB9, PB10, PB11};
+use gpio::AF4;
+use hal::blocking::i2c::{Write, WriteRead};
+use rcc::{APB1, Clocks};
+use time::Hertz;
+
+/// I2C error
+#[derive(Debug)]
+pub enum Error {
+    /// Bus error
+    Bus,
+    /// Arbitration loss
+    Arbitration,
+    // Overrun, // slave mode only
+    // Pec, // SMBUS mode only
+    // Timeout, // SMBUS mode only
+    // Alert, // SMBUS mode only
+    #[doc(hidden)]
+    _Extensible,
+}
+
+// FIXME these should be "closed" traits
+/// SCL pin -- DO NOT IMPLEMENT THIS TRAIT
+pub unsafe trait SclPin<I2C> {}
+
+/// SDA pin -- DO NOT IMPLEMENT THIS TRAIT
+pub unsafe trait SdaPin<I2C> {}
+
+unsafe impl SclPin<I2C1> for PB6<AF4> {}
+unsafe impl SclPin<I2C1> for PB8<AF4> {}
+
+unsafe impl SclPin<I2C2> for PB10<AF4> {}
+
+unsafe impl SdaPin<I2C1> for PB7<AF4> {}
+unsafe impl SdaPin<I2C1> for PB9<AF4> {}
+
+unsafe impl SdaPin<I2C2> for PB11<AF4> {}
+
+/// I2C peripheral operating in master mode
 pub struct I2c<I2C, PINS> {
     i2c: I2C,
     pins: PINS,
 }
 
-pub trait Pins<I2c> {
-    fn setup(&self);
+macro_rules! busy_wait {
+    ($i2c:expr, $flag:ident) => {
+        loop {
+            let isr = $i2c.isr.read();
+
+            if isr.berr().bit_is_set() {
+                return Err(Error::Bus);
+            } else if isr.arlo().bit_is_set() {
+                return Err(Error::Arbitration);
+            } else if isr.$flag().bit_is_set() {
+                break;
+            } else {
+                // try again
+            }
+        }
+    };
 }
 
-impl Pins<I2C1> for (PB8<Output<OpenDrain>>, PB9<Output<OpenDrain>>) {
-    fn setup(&self) {
-        self.0.set_alt_mode(AltMode::I2C);
-        self.1.set_alt_mode(AltMode::I2C);
-    }
-}
 
-impl Pins<I2C2> for (PB10<Output<OpenDrain>>, PB11<Output<OpenDrain>>) {
-    fn setup(&self) {
-        self.0.set_alt_mode(AltMode::I2C);
-        self.1.set_alt_mode(AltMode::I2C);
-    }
-}
 
-#[derive(Debug)]
-pub enum Error {
-    OVERRUN,
-    NACK,
-}
+
+
+
+
+
+
 
 macro_rules! i2c {
     ($I2CX:ident, $i2cx:ident, $i2cxen:ident, $i2crst:ident) => {
