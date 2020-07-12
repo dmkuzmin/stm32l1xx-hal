@@ -2,8 +2,8 @@ use core::fmt;
 use core::marker::PhantomData;
 use core::ptr;
 
-use crate::gpio::gpioa::{PA10, PA2, PA3, PA9};
-use crate::gpio::gpiob::{PB10, PB11};
+use crate::gpio::gpioa::{PA2, PA3};
+use crate::gpio::gpiob::{PB6, PB7, PB10, PB11};
 use crate::gpio::{AltMode, Floating, Input};
 use crate::rcc::Rcc;
 use crate::stm32::{USART1, USART2, USART3};
@@ -124,7 +124,7 @@ pub trait Pins<USART> {
     fn setup(&self);
 }
 
-impl Pins<USART1> for (PA9<Input<Floating>>, PA10<Input<Floating>>) {
+impl Pins<USART1> for (PB6<Input<Floating>>, PB7<Input<Floating>>) {
     fn setup(&self) {
         self.0.set_alt_mode(AltMode::USART1_3);
         self.1.set_alt_mode(AltMode::USART1_3);
