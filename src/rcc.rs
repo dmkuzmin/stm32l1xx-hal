@@ -1,353 +1,847 @@
-use crate::stm32::RCC;
-use crate::time::{Hertz, U32Ext};
+//! Reset and Clock Control
 
-/// System clock mux source
-pub enum ClockSrc {
-    MSI(MSIRange),
-    PLL(PLLSource, PLLMul, PLLDiv),
-    HSE(Hertz),
-    HSI,
+use crate::stm32::{rcc, RCC};
+use cast::u32;
+
+use crate::flash::ACR;
+use crate::pwr::Pwr;
+use crate::time::Hertz;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MsiFreq {
+    #[doc = "range 0 around 65536 Hz"]
+    RANGE_65536HZ = 0,
+    #[doc = "range 1 around 131072 Hz"]
+    RANGE_131072HZ = 1,
+    #[doc = "range 2 around 262144 Hz"]
+    RANGE_262144HZ = 2,
+    #[doc = "range 3 around 524288 Hz"]
+    RANGE_524288HZ = 3,
+    #[doc = "range 4 around 1048000 Hz"]
+    RANGE_1048000HZ = 4,
+    #[doc = "range 5 around 2097000 Hz"]
+    RANGE_2097000HZ = 5,
+    #[doc = "range 6 around 4194000 Hz"]
+    RANGE_4194000HZ = 6,
 }
 
-/// MSI Range
-#[derive(Clone, Copy)]
-pub enum MSIRange {
-    Range0 = 0,
-    Range1 = 1,
-    Range2 = 2,
-    Range3 = 3,
-    Range4 = 4,
-    Range5 = 5,
-    Range6 = 6,
-}
-
-impl Default for MSIRange {
-    fn default() -> MSIRange {
-        MSIRange::Range5
+impl MsiFreq {
+    fn to_hertz(self) -> Hertz {
+        Hertz(match self {
+            Self::RANGE_65536HZ => 65_536,
+            Self::RANGE_131072HZ => 131_072,
+            Self::RANGE_262144HZ => 262_144,
+            Self::RANGE_524288HZ => 524_288,
+            Self::RANGE_1048000HZ => 1_048_000,
+            Self::RANGE_2097000HZ => 2_097_000,
+            Self::RANGE_4194000HZ => 4_194_000,
+        })
     }
 }
 
-/// PLL divider
-#[derive(Clone, Copy)]
-pub enum PLLDiv {
-    Div2 = 1,
-    Div3 = 2,
-    Div4 = 3,
-}
-
-/// PLL multiplier
-#[derive(Clone, Copy)]
-pub enum PLLMul {
-    Mul3 = 0,
-    Mul4 = 1,
-    Mul6 = 2,
-    Mul8 = 3,
-    Mul12 = 4,
-    Mul16 = 5,
-    Mul24 = 6,
-    Mul32 = 7,
-    Mul48 = 8,
-}
-
-/// AHB prescaler
-#[derive(Clone, Copy)]
-pub enum AHBPrescaler {
-    NotDivided = 0,
-    Div2 = 0b1000,
-    Div4 = 0b1001,
-    Div8 = 0b1010,
-    Div16 = 0b1011,
-    Div64 = 0b1100,
-    Div128 = 0b1101,
-    Div256 = 0b1110,
-    Div512 = 0b1111,
-}
-
-/// APB prescaler
-#[derive(Clone, Copy)]
-pub enum APBPrescaler {
-    NotDivided = 0,
-    Div2 = 0b100,
-    Div4 = 0b101,
-    Div8 = 0b110,
-    Div16 = 0b111,
-}
-
-/// PLL clock input source
-#[derive(Clone, Copy)]
-pub enum PLLSource {
-    HSI,
-    HSE(Hertz),
-}
-
-/// HSI speed
-pub const HSI_FREQ: u32 = 16_000_000;
-
-/// Clocks configutation
-pub struct Config {
-    mux: ClockSrc,
-    ahb_pre: AHBPrescaler,
-    apb1_pre: APBPrescaler,
-    apb2_pre: APBPrescaler,
-}
-
-impl Default for Config {
-    fn default() -> Config {
-        Config {
-            mux: ClockSrc::MSI(MSIRange::default()),
-            ahb_pre: AHBPrescaler::NotDivided,
-            apb1_pre: APBPrescaler::NotDivided,
-            apb2_pre: APBPrescaler::NotDivided,
-        }
-    }
-}
-
-impl Config {
-    pub fn clock_src(mut self, mux: ClockSrc) -> Self {
-        self.mux = mux;
-        self
-    }
-
-    pub fn ahb_pre(mut self, pre: AHBPrescaler) -> Self {
-        self.ahb_pre = pre;
-        self
-    }
-
-    pub fn apb1_pre(mut self, pre: APBPrescaler) -> Self {
-        self.apb1_pre = pre;
-        self
-    }
-
-    pub fn apb2_pre(mut self, pre: APBPrescaler) -> Self {
-        self.apb2_pre = pre;
-        self
-    }
-
-    pub fn hsi() -> Config {
-        Config {
-            mux: ClockSrc::HSI,
-            ahb_pre: AHBPrescaler::NotDivided,
-            apb1_pre: APBPrescaler::NotDivided,
-            apb2_pre: APBPrescaler::NotDivided,
-        }
-    }
-
-    pub fn msi(range: MSIRange) -> Config {
-        Config {
-            mux: ClockSrc::MSI(range),
-            ahb_pre: AHBPrescaler::NotDivided,
-            apb1_pre: APBPrescaler::NotDivided,
-            apb2_pre: APBPrescaler::NotDivided,
-        }
-    }
-
-    pub fn pll(pll_src: PLLSource, pll_mul: PLLMul, pll_div: PLLDiv) -> Config {
-        Config {
-            mux: ClockSrc::PLL(pll_src, pll_mul, pll_div),
-            ahb_pre: AHBPrescaler::NotDivided,
-            apb1_pre: APBPrescaler::NotDivided,
-            apb2_pre: APBPrescaler::NotDivided,
-        }
-    }
-
-    pub fn hse<T>(freq: T) -> Config
-    where
-        T: Into<Hertz>,
-    {
-        Config {
-            mux: ClockSrc::HSE(freq.into()),
-            ahb_pre: AHBPrescaler::NotDivided,
-            apb1_pre: APBPrescaler::NotDivided,
-            apb2_pre: APBPrescaler::NotDivided,
-        }
-    }
-}
-
-/// RCC peripheral
-pub struct Rcc {
-    pub clocks: Clocks,
-    pub(crate) rb: RCC,
-}
-
-/// Extension trait that freezes the `RCC` peripheral with provided clocks configuration
+/// Extension trait that constrains the `RCC` peripheral
 pub trait RccExt {
-    fn freeze(self, config: Config) -> Rcc;
+    /// Constrains the `RCC` peripheral so it plays nicely with the other abstractions
+    fn constrain(self) -> Rcc;
 }
 
 impl RccExt for RCC {
-    fn freeze(self, cfgr: Config) -> Rcc {
-        let (sys_clk, sw_bits) = match cfgr.mux {
-            ClockSrc::MSI(range) => {
-                let range = range as u8;
-                // Set MSI range
-                self.icscr.write(|w| unsafe { w.msirange().bits(range) });
+    fn constrain(self) -> Rcc {
+        Rcc {
+            ahb: AHB { _0: () },
+            apb1: APB1 { _0: () },
+            apb2: APB2 { _0: () },
+            bdcr: BDCR { _0: () },
+            csr: CSR { _0: () },
+            crrcr: CRRCR { _0: () },
+            cfgr: CFGR {
+                hse: None,
+                lse: None,
+                msi: None,
+                hsi48: false,
+                lsi: false,
+                hclk: None,
+                pclk1: None,
+                pclk2: None,
+                sysclk: None,
+                pll_source: None,
+                pll_config: None,
+            },
+        }
+    }
+}
 
-                // Enable MSI
-                self.cr.write(|w| w.msion().set_bit());
-                while self.cr.read().msirdy().bit_is_clear() {}
+/// Constrained RCC peripheral
+pub struct Rcc {
+    /// AMBA High-performance Bus (AHB) registers
+    pub ahb: AHB,
+    /// Advanced Peripheral Bus 1 (APB1) registers
+    pub apb1: APB1,
+    /// Advanced Peripheral Bus 2 (APB2) registers
+    pub apb2: APB2,
+    /// Clock configuration register
+    pub cfgr: CFGR,
+    /// Backup domain control register
+    pub bdcr: BDCR,
+    /// Control/Status Register
+    pub csr: CSR,
+    /// Clock recovery RC register
+    pub crrcr: CRRCR,
+}
 
-                let freq = 32_768 * (1 << (range + 1));
-                (freq, 0)
-            }
-            ClockSrc::HSI => {
-                // Enable HSI
-                self.cr.write(|w| w.hsion().set_bit());
-                while self.cr.read().hsirdy().bit_is_clear() {}
+/// CSR Control/Status Register
+pub struct CSR {
+    _0: (),
+}
 
-                (HSI_FREQ, 1)
-            }
-            ClockSrc::HSE(freq) => {
-                // Enable HSE
-                self.cr.write(|w| w.hseon().set_bit());
-                while self.cr.read().hserdy().bit_is_clear() {}
+impl CSR {
+    // TODO remove `allow`
+    #[allow(dead_code)]
+    pub(crate) fn csr(&mut self) -> &rcc::CSR {
+        // NOTE(unsafe) this proxy grants exclusive access to this register
+        unsafe { &(*RCC::ptr()).csr }
+    }
+}
 
-                (freq.0, 2)
-            }
-            ClockSrc::PLL(src, mul, div) => {
-                let (src_bit, freq) = match src {
-                    PLLSource::HSE(freq) => {
-                        // Enable HSE
-                        self.cr.write(|w| w.hseon().set_bit());
-                        while self.cr.read().hserdy().bit_is_clear() {}
-                        (true, freq.0)
-                    }
-                    PLLSource::HSI => {
-                        // Enable HSI
-                        self.cr.write(|w| w.hsion().set_bit());
-                        while self.cr.read().hsirdy().bit_is_clear() {}
-                        (false, 15_998_976)
-                    }
-                };
+/// Clock recovery RC register
+pub struct CRRCR {
+    _0: (),
+}
 
-                // Disable PLL
-                self.cr.write(|w| w.pllon().clear_bit());
-                while self.cr.read().pllrdy().bit_is_set() {}
+impl CRRCR {
+    // TODO remove `allow`
+    #[allow(dead_code)]
+    pub(crate) fn crrcr(&mut self) -> &rcc::CRRCR {
+        // NOTE(unsafe) this proxy grants exclusive access to this register
+        unsafe { &(*RCC::ptr()).crrcr }
+    }
 
-                let mul_bytes = mul as u8;
-                let div_bytes = div as u8;
+    /// Checks if the 48 MHz HSI is enabled
+    pub fn is_hsi48_on(&mut self) -> bool {
+        self.crrcr().read().hsi48on().bit()
+    }
 
-                let freq = match mul {
-                    PLLMul::Mul3 => freq * 3,
-                    PLLMul::Mul4 => freq * 4,
-                    PLLMul::Mul6 => freq * 6,
-                    PLLMul::Mul8 => freq * 8,
-                    PLLMul::Mul12 => freq * 12,
-                    PLLMul::Mul16 => freq * 16,
-                    PLLMul::Mul24 => freq * 24,
-                    PLLMul::Mul32 => freq * 32,
-                    PLLMul::Mul48 => freq * 48,
-                };
+    /// Checks if the 48 MHz HSI is ready
+    pub fn is_hsi48_ready(&mut self) -> bool {
+        self.crrcr().read().hsi48rdy().bit()
+    }
+}
 
-                let freq = match div {
-                    PLLDiv::Div2 => freq / 2,
-                    PLLDiv::Div3 => freq / 3,
-                    PLLDiv::Div4 => freq / 4,
-                };
-                assert!(freq <= 24.mhz().0);
+/// BDCR Backup domain control register registers
+pub struct BDCR {
+    _0: (),
+}
 
-                self.cfgr.write(move |w| unsafe {
-                    w.pllmul()
-                        .bits(mul_bytes)
-                        .plldiv()
-                        .bits(div_bytes)
-                        .pllsrc()
-                        .bit(src_bit)
-                });
+impl BDCR {
+    // TODO remove `allow`
+    #[allow(dead_code)]
+    pub(crate) fn enr(&mut self) -> &rcc::BDCR {
+        // NOTE(unsafe) this proxy grants exclusive access to this register
+        unsafe { &(*RCC::ptr()).bdcr }
+    }
+}
 
-                // Enable PLL
-                self.cr.write(|w| w.pllon().set_bit());
-                while self.cr.read().pllrdy().bit_is_clear() {}
+/// AMBA High-performance Bus 1 (AHB) registers
+pub struct AHB {
+    _0: (),
+}
 
-                (freq, 3)
-            }
-        };
+impl AHB {
+    // TODO remove `allow`
+    #[allow(dead_code)]
+    pub(crate) fn enr(&mut self) -> &rcc::AHBENR {
+        // NOTE(unsafe) this proxy grants exclusive access to this register
+        unsafe { &(*RCC::ptr()).ahbenr }
+    }
 
-        self.cfgr.modify(|_, w| unsafe {
-            w.sw()
-                .bits(sw_bits)
-                .hpre()
-                .bits(cfgr.ahb_pre as u8)
-                .ppre1()
-                .bits(cfgr.apb1_pre as u8)
-                .ppre2()
-                .bits(cfgr.apb2_pre as u8)
+    // TODO remove `allow`
+    #[allow(dead_code)]
+    pub(crate) fn rstr(&mut self) -> &rcc::AHBRSTR {
+        // NOTE(unsafe) this proxy grants exclusive access to this register
+        unsafe { &(*RCC::ptr()).ahbrstr }
+    }
+}
+
+/// Advanced Peripheral Bus 1 (APB1) registers
+pub struct APB1 {
+    _0: (),
+}
+
+impl APB1 {
+    pub(crate) fn enr(&mut self) -> &rcc::APB1ENR {
+        // NOTE(unsafe) this proxy grants exclusive access to this register
+        unsafe { &(*RCC::ptr()).apb1enr }
+    }
+
+    pub(crate) fn rstr(&mut self) -> &rcc::APB1RSTR {
+        // NOTE(unsafe) this proxy grants exclusive access to this register
+        unsafe { &(*RCC::ptr()).apb1rstr }
+    }
+}
+
+/// Advanced Peripheral Bus 2 (APB2) registers
+pub struct APB2 {
+    _0: (),
+}
+
+impl APB2 {
+    pub(crate) fn enr(&mut self) -> &rcc::APB2ENR {
+        // NOTE(unsafe) this proxy grants exclusive access to this register
+        unsafe { &(*RCC::ptr()).apb2enr }
+    }
+
+    pub(crate) fn rstr(&mut self) -> &rcc::APB2RSTR {
+        // NOTE(unsafe) this proxy grants exclusive access to this register
+        unsafe { &(*RCC::ptr()).apb2rstr }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+/// HSE Configuration
+struct HseConfig {
+    /// Clock speed of HSE
+    speed: u32,
+    /// If the clock driving circuitry is bypassed i.e. using an oscillator, not a crystal or
+    /// resonator
+    bypass: CrystalBypass,
+    /// Clock Security System enable/disable
+    css: ClockSecuritySystem,
+}
+
+#[derive(Debug, PartialEq)]
+/// LSE Configuration
+struct LseConfig {
+    /// If the clock driving circuitry is bypassed i.e. using an oscillator, not a crystal or
+    /// resonator
+    bypass: CrystalBypass,
+    /// Clock Security System enable/disable
+    css: ClockSecuritySystem,
+}
+
+/// Crystal bypass selector
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum CrystalBypass {
+    /// If the clock driving circuitry is bypassed i.e. using an oscillator
+    Enable,
+    /// If the clock driving circuitry is not bypassed i.e. using a crystal or resonator
+    Disable,
+}
+
+/// Clock Security System (CSS) selector
+///
+/// When this is enabled on HSE it will fire of the NMI interrupt on failure and for the LSE the
+/// MCU will be woken if in Standby and then the LSECSS interrupt will fire. See datasheet on how
+/// to recover for CSS failures.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ClockSecuritySystem {
+    /// Enable the clock security system to detect clock failures
+    Enable,
+    /// Leave the clock security system disabled
+    Disable,
+}
+
+const HSI: u32 = 16_000_000; // Hz
+
+/// Clock configuration
+pub struct CFGR {
+    hse: Option<HseConfig>,
+    lse: Option<LseConfig>,
+    msi: Option<MsiFreq>,
+    hsi48: bool,
+    lsi: bool,
+    hclk: Option<u32>,
+    pclk1: Option<u32>,
+    pclk2: Option<u32>,
+    sysclk: Option<u32>,
+    pll_source: Option<PllSource>,
+    pll_config: Option<PllConfig>,
+}
+
+impl CFGR {
+    /// Add an HSE to the system
+    pub fn hse<F>(mut self, freq: F, bypass: CrystalBypass, css: ClockSecuritySystem) -> Self
+    where
+        F: Into<Hertz>,
+    {
+        self.hse = Some(HseConfig {
+            speed: freq.into().0,
+            bypass: bypass,
+            css: css,
         });
 
-        let ahb_freq = match cfgr.ahb_pre {
-            AHBPrescaler::NotDivided => sys_clk,
-            pre => sys_clk / (1 << (pre as u8 - 7)),
+        self
+    }
+
+    /// Add an 32.768 kHz LSE to the system
+    pub fn lse(mut self, bypass: CrystalBypass, css: ClockSecuritySystem) -> Self {
+        self.lse = Some(LseConfig {
+            bypass: bypass,
+            css: css,
+        });
+
+        self
+    }
+
+    /// Sets a frequency for the AHB bus
+    pub fn hclk<F>(mut self, freq: F) -> Self
+    where
+        F: Into<Hertz>,
+    {
+        self.hclk = Some(freq.into().0);
+        self
+    }
+
+    /// Enable the 48 MHz USB, RNG, SDMMC HSI clock source. Not available on all stm32l4x6 series
+    pub fn hsi48(mut self, on: bool) -> Self {
+        self.hsi48 = on;
+        self
+    }
+
+    /// Enables the MSI with the specified speed
+    pub fn msi(mut self, range: MsiFreq) -> Self {
+        self.msi = Some(range);
+        self
+    }
+
+    /// Sets LSI clock on (the default) or off
+    pub fn lsi(mut self, on: bool) -> Self {
+        self.lsi = on;
+        self
+    }
+
+    /// Sets a frequency for the APB1 bus
+    pub fn pclk1<F>(mut self, freq: F) -> Self
+    where
+        F: Into<Hertz>,
+    {
+        self.pclk1 = Some(freq.into().0);
+        self
+    }
+
+    /// Sets a frequency for the APB2 bus
+    pub fn pclk2<F>(mut self, freq: F) -> Self
+    where
+        F: Into<Hertz>,
+    {
+        self.pclk2 = Some(freq.into().0);
+        self
+    }
+
+    /// Sets the system (core) frequency
+    pub fn sysclk<F>(mut self, freq: F) -> Self
+    where
+        F: Into<Hertz>,
+    {
+        self.sysclk = Some(freq.into().0);
+        self
+    }
+
+    /// Sets the system (core) frequency with some pll configuration
+    pub fn sysclk_with_pll<F>(mut self, freq: F, cfg: PllConfig) -> Self
+    where
+        F: Into<Hertz>,
+    {
+        self.pll_config = Some(cfg);
+        self.sysclk = Some(freq.into().0);
+        self
+    }
+
+    /// Sets the PLL source
+    pub fn pll_source(mut self, source: PllSource) -> Self {
+        self.pll_source = Some(source);
+        self
+    }
+
+    /// Freezes the clock configuration, making it effective
+    pub fn freeze(&self, acr: &mut ACR, pwr: &mut Pwr) -> Clocks {
+        let rcc = unsafe { &*RCC::ptr() };
+
+        //
+        // 1. Setup clocks
+        //
+
+        // Turn on the internal 32 kHz LSI oscillator
+        let lsi_used = match (self.lsi, &self.lse) {
+            (true, _)
+            | (
+                _,
+                &Some(LseConfig {
+                    bypass: _,
+                    css: ClockSecuritySystem::Enable,
+                }),
+            ) => {
+                rcc.csr.modify(|_, w| w.lsion().set_bit());
+
+                // Wait until LSI is running
+                while rcc.csr.read().lsirdy().bit_is_clear() {}
+
+                true
+            }
+            _ => false,
         };
 
-        let (apb1_freq, apb1_tim_freq) = match cfgr.apb1_pre {
-            APBPrescaler::NotDivided => (ahb_freq, ahb_freq),
-            pre => {
-                let freq = ahb_freq / (1 << (pre as u8 - 3));
-                (freq, freq * 2)
+        if let Some(lse_cfg) = &self.lse {
+            // 1. Unlock the backup domain
+            pwr.cr1.reg().modify(|_, w| w.dbp().set_bit());
+
+            // 2. Setup the LSE
+            rcc.bdcr.modify(|_, w| {
+                w.lseon().set_bit(); // Enable LSE
+
+                if lse_cfg.bypass == CrystalBypass::Enable {
+                    w.lsebyp().set_bit();
+                } else {
+                    unsafe {
+                        w.lsedrv().bits(0b11);
+                    } // Max drive strength, TODO: should probably be settable
+                }
+
+                w
+            });
+
+            // Wait until LSE is running
+            while rcc.bdcr.read().lserdy().bit_is_clear() {}
+
+            // Setup CSS
+            if lse_cfg.css == ClockSecuritySystem::Enable {
+                // Enable CSS and interrupt
+                rcc.bdcr.modify(|_, w| w.lsecsson().set_bit());
+                rcc.cier.modify(|_, w| w.lsecssie().set_bit());
+            }
+        }
+
+        // If HSE is available, set it up
+        if let Some(hse_cfg) = &self.hse {
+            rcc.cr.write(|w| {
+                w.hseon().set_bit();
+
+                if hse_cfg.bypass == CrystalBypass::Enable {
+                    w.hsebyp().set_bit();
+                }
+
+                w
+            });
+
+            while rcc.cr.read().hserdy().bit_is_clear() {}
+
+            // Setup CSS
+            if hse_cfg.css == ClockSecuritySystem::Enable {
+                // Enable CSS
+                rcc.cr.modify(|_, w| w.csson().set_bit());
+            }
+        }
+
+        if let Some(msi) = self.msi {
+            unsafe {
+                rcc.cr.modify(|_, w| {
+                    w.msirange()
+                        .bits(msi as u8)
+                        .msirgsel()
+                        .set_bit()
+                        .msion()
+                        .set_bit();
+
+                    // If LSE is enabled, enable calibration of MSI
+                    if let Some(_) = self.lse {
+                        w.msipllen().set_bit();
+                    }
+
+                    w
+                })
+            };
+
+            // Wait until MSI is running
+            while rcc.cr.read().msirdy().bit_is_clear() {}
+        }
+
+        // Turn on USB, RNG Clock using the HSI48 CLK source
+        if self.hsi48 {
+            // p. 180 in ref-manual
+            rcc.crrcr.modify(|_, w| w.hsi48on().set_bit());
+
+            // Wait until HSI48 is running
+            while rcc.crrcr.read().hsi48rdy().bit_is_clear() {}
+        }
+
+        // Select MSI as clock source for usb48, rng ...
+        if let Some(MsiFreq::RANGE48M) = self.msi {
+            unsafe { rcc.ccipr.modify(|_, w| w.clk48sel().bits(0b11)) };
+        }
+
+        //
+        // 2. Setup PLL
+        //
+
+        // Select PLL source
+        let (clock_speed, pll_source) = if let Some(source) = self.pll_source {
+            match source {
+                PllSource::HSE => {
+                    if let Some(hse) = &self.hse {
+                        (hse.speed, source)
+                    } else {
+                        panic!("HSE selected as PLL source, but not enabled");
+                    }
+                }
+                PllSource::HSI16 => (HSI, source),
+                PllSource::MSI => {
+                    if let Some(msi) = self.msi {
+                        (msi.to_hertz().0, source)
+                    } else {
+                        panic!("MSI selected as PLL source, but not enabled");
+                    }
+                }
+            }
+        } else {
+            // No specific PLL source selected, do educated guess
+
+            // 1. HSE
+            if let Some(hse) = &self.hse {
+                (hse.speed, PllSource::HSE)
+            }
+            // 2. MSI
+            else if let Some(msi) = self.msi {
+                (msi.to_hertz().0, PllSource::MSI)
+            }
+            // 3. HSI as fallback
+            else {
+                (HSI, PllSource::HSI16)
             }
         };
 
-        let (apb2_freq, apb2_tim_freq) = match cfgr.apb2_pre {
-            APBPrescaler::NotDivided => (ahb_freq, ahb_freq),
-            pre => {
-                let freq = ahb_freq / (1 << (pre as u8 - 3));
-                (freq, freq * 2)
+        // Check if HSI should be started
+        if pll_source == PllSource::HSI16 || (self.msi.is_none() && self.hse.is_none()) {
+            rcc.cr.write(|w| w.hsion().set_bit());
+            while rcc.cr.read().hsirdy().bit_is_clear() {}
+        }
+
+        let pllconf = if self.pll_config.is_none() {
+            if let Some(sysclk) = self.sysclk {
+                // Calculate PLL multiplier and create a best effort pll config, just multiply n
+                let plln = (2 * sysclk) / clock_speed;
+
+                Some(PllConfig::new(1, plln as u8, PllDivider::Div2))
+            } else {
+                None
             }
+        } else {
+            self.pll_config
         };
 
-        let clocks = Clocks {
-            sys_clk: sys_clk.hz(),
-            ahb_clk: ahb_freq.hz(),
-            apb1_clk: apb1_freq.hz(),
-            apb2_clk: apb2_freq.hz(),
-            apb1_tim_clk: apb1_tim_freq.hz(),
-            apb2_tim_clk: apb2_tim_freq.hz(),
-        };
+        let sysclk = self.sysclk.unwrap_or(HSI);
 
-        Rcc { rb: self, clocks }
+        assert!(sysclk <= 80_000_000);
+
+        let (hpre_bits, hpre_div) = self
+            .hclk
+            .map(|hclk| match sysclk / hclk {
+                // From p 194 in RM0394
+                0 => unreachable!(),
+                1 => (0b0000, 1),
+                2 => (0b1000, 2),
+                3..=5 => (0b1001, 4),
+                6..=11 => (0b1010, 8),
+                12..=39 => (0b1011, 16),
+                40..=95 => (0b1100, 64),
+                96..=191 => (0b1101, 128),
+                192..=383 => (0b1110, 256),
+                _ => (0b1111, 512),
+            })
+            .unwrap_or((0b0000, 1));
+
+        let hclk = sysclk / hpre_div;
+
+        assert!(hclk <= sysclk);
+
+        let (ppre1_bits, ppre1) = self
+            .pclk1
+            .map(|pclk1| match hclk / pclk1 {
+                // From p 194 in RM0394
+                0 => unreachable!(),
+                1 => (0b000, 1),
+                2 => (0b100, 2),
+                3..=5 => (0b101, 4),
+                6..=11 => (0b110, 8),
+                _ => (0b111, 16),
+            })
+            .unwrap_or((0b000, 1));
+
+        let pclk1 = hclk / u32(ppre1);
+
+        assert!(pclk1 <= sysclk);
+
+        let (ppre2_bits, ppre2) = self
+            .pclk2
+            .map(|pclk2| match hclk / pclk2 {
+                // From p 194 in RM0394
+                0 => unreachable!(),
+                1 => (0b000, 1),
+                2 => (0b100, 2),
+                3..=5 => (0b101, 4),
+                6..=11 => (0b110, 8),
+                _ => (0b111, 16),
+            })
+            .unwrap_or((0b000, 1));
+
+        let pclk2 = hclk / u32(ppre2);
+
+        assert!(pclk2 <= sysclk);
+
+        // adjust flash wait states
+        unsafe {
+            acr.acr().write(|w| {
+                w.latency().bits(if sysclk <= 24_000_000 {
+                    0b000
+                } else if sysclk <= 48_000_000 {
+                    0b001
+                } else {
+                    0b010
+                })
+            })
+        }
+
+        let sysclk_src_bits;
+        if let Some(pllconf) = pllconf {
+            // Sanity-checks per RM0394, 6.4.4 PLL configuration register (RCC_PLLCFGR)
+            let r = pllconf.r.to_division_factor();
+            let clock_speed = clock_speed / (pllconf.m as u32 + 1);
+            let vco = clock_speed * pllconf.n as u32;
+            let output_clock = vco / r;
+
+            assert!(r <= 8); // Allowed max output divider
+            assert!(pllconf.n >= 8); // Allowed min multiplier
+            assert!(pllconf.n <= 86); // Allowed max multiplier
+            assert!(clock_speed >= 4_000_000); // VCO input clock min
+            assert!(clock_speed <= 16_000_000); // VCO input clock max
+            assert!(vco >= 64_000_000); // VCO output min
+            assert!(vco <= 334_000_000); // VCO output max
+            assert!(output_clock <= 80_000_000); // Max output clock
+
+            // use PLL as source
+            sysclk_src_bits = 0b11;
+            rcc.cr.modify(|_, w| w.pllon().clear_bit());
+            while rcc.cr.read().pllrdy().bit_is_set() {}
+
+            let pllsrc_bits = pll_source.to_pllsrc();
+
+            rcc.pllcfgr.modify(|_, w| unsafe {
+                w.pllsrc()
+                    .bits(pllsrc_bits)
+                    .pllm()
+                    .bits(pllconf.m)
+                    .pllr()
+                    .bits(pllconf.r.to_bits())
+                    .plln()
+                    .bits(pllconf.n)
+            });
+
+            rcc.cr.modify(|_, w| w.pllon().set_bit());
+
+            while rcc.cr.read().pllrdy().bit_is_clear() {}
+
+            rcc.pllcfgr.modify(|_, w| w.pllren().set_bit());
+
+            // SW: PLL selected as system clock
+            rcc.cfgr.modify(|_, w| unsafe {
+                w.ppre2()
+                    .bits(ppre2_bits)
+                    .ppre1()
+                    .bits(ppre1_bits)
+                    .hpre()
+                    .bits(hpre_bits)
+                    .sw()
+                    .bits(sysclk_src_bits)
+            });
+        } else {
+            // use HSI as source
+            sysclk_src_bits = 0b01;
+
+            rcc.cr.write(|w| w.hsion().set_bit());
+            while rcc.cr.read().hsirdy().bit_is_clear() {}
+
+            // SW: HSI selected as system clock
+            rcc.cfgr.write(|w| unsafe {
+                w.ppre2()
+                    .bits(ppre2_bits)
+                    .ppre1()
+                    .bits(ppre1_bits)
+                    .hpre()
+                    .bits(hpre_bits)
+                    .sw()
+                    .bits(sysclk_src_bits)
+            });
+        }
+
+        while rcc.cfgr.read().sws().bits() != sysclk_src_bits {}
+
+        //
+        // 3. Shutdown unused clocks that have auto-started
+        //
+
+        // MSI always starts on reset
+        if self.msi.is_none() {
+            rcc.cr
+                .modify(|_, w| w.msion().clear_bit().msipllen().clear_bit())
+        }
+
+        //
+        // 4. Clock setup done!
+        //
+
+        Clocks {
+            hclk: Hertz(hclk),
+            lsi: lsi_used,
+            lse: self.lse.is_some(),
+            msi: self.msi,
+            hsi48: self.hsi48,
+            pclk1: Hertz(pclk1),
+            pclk2: Hertz(pclk2),
+            ppre1: ppre1,
+            ppre2: ppre2,
+            sysclk: Hertz(sysclk),
+            pll_source: pllconf.map(|_| pll_source),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+/// PLL output divider options
+pub enum PllDivider {
+    /// Divider PLL output by 2
+    Div2 = 0b00,
+    /// Divider PLL output by 4
+    Div4 = 0b01,
+    /// Divider PLL output by 6
+    Div6 = 0b10,
+    /// Divider PLL output by 8
+    Div8 = 0b11,
+}
+
+impl PllDivider {
+    #[inline(always)]
+    fn to_bits(self) -> u8 {
+        self as u8
+    }
+
+    #[inline(always)]
+    fn to_division_factor(self) -> u32 {
+        match self {
+            Self::Div2 => 2,
+            Self::Div4 => 4,
+            Self::Div6 => 6,
+            Self::Div8 => 8,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+/// PLL Configuration
+pub struct PllConfig {
+    // Main PLL division factor
+    m: u8,
+    // Main PLL multiplication factor
+    n: u8,
+    // Main PLL division factor for PLLCLK (system clock)
+    r: PllDivider,
+}
+
+impl PllConfig {
+    /// Create a new PLL config from manual settings
+    ///
+    /// PLL output = ((SourceClk / input_divider) * multiplier) / output_divider
+    pub fn new(input_divider: u8, multiplier: u8, output_divider: PllDivider) -> Self {
+        assert!(input_divider > 0);
+
+        PllConfig {
+            m: input_divider - 1,
+            n: multiplier,
+            r: output_divider,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+/// PLL Source
+pub enum PllSource {
+    /// Multi-speed internal clock
+    MSI,
+    /// High-speed internal clock
+    HSI16,
+    /// High-speed external clock
+    HSE,
+}
+
+impl PllSource {
+    fn to_pllsrc(self) -> u8 {
+        match self {
+            Self::MSI => 0b01,
+            Self::HSI16 => 0b10,
+            Self::HSE => 0b11,
+        }
     }
 }
 
 /// Frozen clock frequencies
 ///
 /// The existence of this value indicates that the clock configuration can no longer be changed
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Clocks {
-    sys_clk: Hertz,
-    ahb_clk: Hertz,
-    apb1_clk: Hertz,
-    apb1_tim_clk: Hertz,
-    apb2_clk: Hertz,
-    apb2_tim_clk: Hertz,
+    hclk: Hertz,
+    hsi48: bool,
+    msi: Option<MsiFreq>,
+    lsi: bool,
+    lse: bool,
+    pclk1: Hertz,
+    pclk2: Hertz,
+    ppre1: u8,
+    ppre2: u8,
+    sysclk: Hertz,
+    pll_source: Option<PllSource>,
 }
 
 impl Clocks {
-    /// Returns the system (core) frequency
-    pub fn sys_clk(&self) -> Hertz {
-        self.sys_clk
+    /// Returns the frequency of the AHB
+    pub fn hclk(&self) -> Hertz {
+        self.hclk
     }
 
-    /// Returns the frequency of the AHB
-    pub fn ahb_clk(&self) -> Hertz {
-        self.ahb_clk
+    /// Returns status of HSI48
+    pub fn hsi48(&self) -> bool {
+        self.hsi48
+    }
+
+    // Returns the status of the MSI
+    pub fn msi(&self) -> Option<MsiFreq> {
+        self.msi
+    }
+
+    /// Returns status of HSI48
+    pub fn lsi(&self) -> bool {
+        self.lsi
     }
 
     /// Returns the frequency of the APB1
-    pub fn apb1_clk(&self) -> Hertz {
-        self.apb1_clk
-    }
-
-    /// Returns the frequency of the APB1 timers
-    pub fn apb1_tim_clk(&self) -> Hertz {
-        self.apb1_tim_clk
+    pub fn pclk1(&self) -> Hertz {
+        self.pclk1
     }
 
     /// Returns the frequency of the APB2
-    pub fn apb2_clk(&self) -> Hertz {
-        self.apb2_clk
+    pub fn pclk2(&self) -> Hertz {
+        self.pclk2
     }
 
-    /// Returns the frequency of the APB2 timers
-    pub fn apb2_tim_clk(&self) -> Hertz {
-        self.apb2_tim_clk
+    // TODO remove `allow`
+    #[allow(dead_code)]
+    pub(crate) fn ppre1(&self) -> u8 {
+        self.ppre1
+    }
+    // TODO remove `allow`
+    #[allow(dead_code)]
+    pub(crate) fn ppre2(&self) -> u8 {
+        self.ppre2
+    }
+
+    /// Returns the system (core) frequency
+    pub fn sysclk(&self) -> Hertz {
+        self.sysclk
     }
 }
