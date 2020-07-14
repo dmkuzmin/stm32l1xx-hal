@@ -1,23 +1,23 @@
 //! Time units
 
-use cortex_m::peripheral::DWT;
-
-use rcc::Clocks;
+use cortex_m::peripheral::syst::SystClkSource;
+use cortex_m::peripheral::SYST;
+use crate::rcc::Clocks;
 
 /// Bits per second
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Bps(pub u32);
 
 /// Hertz
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Hertz(pub u32);
 
 /// KiloHertz
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct KiloHertz(pub u32);
 
 /// MegaHertz
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct MegaHertz(pub u32);
 
 /// Extension trait that adds convenience methods to the `u32` type
@@ -71,20 +71,27 @@ impl Into<KiloHertz> for MegaHertz {
     }
 }
 
+impl From<u32> for Hertz {
+    fn from(ms: u32) -> Self {
+        if ms <= 1000 {
+            Hertz((1000 + ms / 2) / ms)
+        } else {
+            Hertz(1)
+        }
+    }
+}
+
 /// A monotonic nondecreasing timer
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct MonoTimer {
     frequency: Hertz,
 }
 
 impl MonoTimer {
     /// Creates a new `Monotonic` timer
-    pub fn new(mut dwt: DWT, clocks: Clocks) -> Self {
-        dwt.enable_cycle_counter();
-
-        // now the CYCCNT counter can't be stopped or resetted
-        drop(dwt);
-
+    pub fn new(mut syst: SYST, clocks: Clocks) -> Self {
+        syst.set_clock_source(SystClkSource::Core);
+        syst.enable_counter();
         MonoTimer {
             frequency: clocks.sysclk(),
         }
@@ -98,13 +105,13 @@ impl MonoTimer {
     /// Returns an `Instant` corresponding to "now"
     pub fn now(&self) -> Instant {
         Instant {
-            now: DWT::get_cycle_count(),
+            now: SYST::get_current(),
         }
     }
 }
 
 /// A measurement of a monotonically nondecreasing clock
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Instant {
     now: u32,
 }
@@ -112,6 +119,6 @@ pub struct Instant {
 impl Instant {
     /// Ticks elapsed since the `Instant` was created
     pub fn elapsed(&self) -> u32 {
-        DWT::get_cycle_count().wrapping_sub(self.now)
+        SYST::get_current().wrapping_sub(self.now)
     }
 }

@@ -1,13 +1,13 @@
 //! I2C
 
 use cast::u8;
-use stm32::{I2C1, I2C2};
+use crate::stm32::{I2C1, I2C2};
 
-use gpio::gpiob::{PB6, PB7, PB8, PB9, PB10, PB11};
-use gpio::AF4;
+use crate::gpio::gpiob::{PB6, PB7, PB8, PB9, PB10, PB11};
+use crate::gpio::AF4;
 use hal::blocking::i2c::{Write, WriteRead};
-use rcc::{APB1, Clocks};
-use time::Hertz;
+use crate::rcc::{APB1, Clocks};
+use crate::time::Hertz;
 
 /// I2C error
 #[derive(Debug)]
