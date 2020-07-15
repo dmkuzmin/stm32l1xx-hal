@@ -1,5 +1,6 @@
 //! General Purpose Input / Output
 
+use crate::rcc::{AHB, APB2};
 use core::marker::PhantomData;
 
 /// Extension trait to split a GPIO peripheral in independent pins and registers
@@ -8,7 +9,7 @@ pub trait GpioExt {
     type Parts;
 
     /// Splits the GPIO block into independent pins and registers
-    fn split(self) -> Self::Parts;
+    fn split(self, ahb: &mut AHB) -> Self::Parts;
 }
 
 /// Input mode (type state)
@@ -16,28 +17,21 @@ pub struct Input<MODE> {
     _mode: PhantomData<MODE>,
 }
 
-/// Floating input (type state)
-pub struct Floating;
-
-/// Pulled down input (type state)
-pub struct PullDown;
-
-/// Pulled up input (type state)
-pub struct PullUp;
-
-/// Open drain input or output (type state)
-pub struct OpenDrain;
-
-/// Analog mode (type state)
-pub struct Analog;
-
 /// Output mode (type state)
 pub struct Output<MODE> {
     _mode: PhantomData<MODE>,
 }
 
+/// Floating input (type state)
+pub struct Floating;
+/// Pulled down input and output (type state)
+pub struct PullDown;
+/// Pulled up input and output (type state)
+pub struct PullUp;
 /// Push pull output (type state)
 pub struct PushPull;
+/// Open drain output (type state)
+pub struct OpenDrain;
 
 /// GPIO Pin speed selection
 pub enum Speed {
@@ -45,6 +39,85 @@ pub enum Speed {
     Medium = 1,
     High = 2,
     VeryHigh = 3,
+}
+
+/// Some alternate mode in open drain configuration (type state)
+pub struct AlternateOD<AF, MODE> {
+    _af: PhantomData<AF>,
+    _mode: PhantomData<MODE>,
+}
+
+pub enum State {
+    High,
+    Low,
+}
+
+/// Alternate function 0 (type state)
+pub struct AF0;
+
+/// Alternate function 1 (type state)
+pub struct AF1;
+
+/// Alternate function 2 (type state)
+pub struct AF2;
+
+/// Alternate function 3 (type state)
+pub struct AF3;
+
+/// Alternate function 4 (type state)
+pub struct AF4;
+
+/// Alternate function 5 (type state)
+pub struct AF5;
+
+/// Alternate function 6 (type state)
+pub struct AF6;
+
+/// Alternate function 7 (type state)
+pub struct AF7;
+
+/// Alternate function 8 (type state)
+pub struct AF8;
+
+/// Alternate function 9 (type state)
+pub struct AF9;
+
+/// Alternate function 10 (type state)
+pub struct AF10;
+
+/// Alternate function 11 (type state)
+pub struct AF11;
+
+/// Alternate function 12 (type state)
+pub struct AF12;
+
+/// Alternate function 13 (type state)
+pub struct AF13;
+
+/// Alternate function 14 (type state)
+pub struct AF14;
+
+/// Alternate function 15 (type state)
+pub struct AF15;
+
+// Using SCREAMING_SNAKE_CASE to be consistent with other HALs
+// see 59b2740 and #125 for motivation
+#[allow(non_camel_case_types)]
+#[derive(Debug, PartialEq)]
+pub enum Edge {
+    RISING,
+    FALLING,
+    RISING_FALLING,
+}
+
+/// External Interrupt Pin
+pub trait ExtiPin {
+    fn make_interrupt_source(&mut self, syscfg: &mut SYSCFG, apb2: &mut APB2);
+    fn trigger_on_edge(&mut self, exti: &mut EXTI, level: Edge);
+    fn enable_interrupt(&mut self, exti: &mut EXTI);
+    fn disable_interrupt(&mut self, exti: &mut EXTI);
+    fn clear_interrupt_pending_bit(&mut self);
+    fn check_interrupt(&mut self) -> bool;
 }
 
 #[allow(dead_code)]
@@ -74,7 +147,7 @@ macro_rules! gpio {
             use core::marker::PhantomData;
             use core::convert::Infallible;
 
-            use hal::digital::v2::{toggleable, InputPin, OutputPin, StatefulOutputPin};
+            use hal::digital::{toggleable, InputPin, OutputPin, StatefulOutputPin};
             use crate::stm32::$GPIOX;
             use crate::stm32::RCC;
             use super::{

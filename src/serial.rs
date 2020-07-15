@@ -3,7 +3,7 @@ use core::marker::PhantomData;
 use core::ptr;
 
 use crate::gpio::gpioa::{PA2, PA3};
-use crate::gpio::gpiob::{PB6, PB7, PB10, PB11};
+use crate::gpio::gpiob::{PB10, PB11, PB6, PB7};
 use crate::gpio::{AltMode, Floating, Input};
 use crate::rcc::Rcc;
 use crate::stm32::{USART1, USART2, USART3};

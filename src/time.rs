@@ -1,8 +1,8 @@
 //! Time units
 
+use crate::rcc::Clocks;
 use cortex_m::peripheral::syst::SystClkSource;
 use cortex_m::peripheral::SYST;
-use crate::rcc::Clocks;
 
 /// Bits per second
 #[derive(Clone, Copy, Debug)]
