@@ -1,11 +1,10 @@
 //! Reset and Clock Control
 
-use crate::stm32::{rcc, RCC};
-use cast::u32;
-
 use crate::flash::ACR;
 use crate::pwr::Pwr;
+use crate::stm32::{rcc, RCC};
 use crate::time::Hertz;
+use cast::u32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MsiFreq {
@@ -623,22 +622,20 @@ impl CFGR {
 
             let pllsrc_bits = pll_source.to_pllsrc();
 
-            rcc.pllcfgr.modify(|_, w| unsafe {
+            rcc.cfgr.modify(|_, w| unsafe {
                 w.pllsrc()
                     .bits(pllsrc_bits)
-                    .pllm()
-                    .bits(pllconf.m)
-                    .pllr()
-                    .bits(pllconf.r.to_bits())
-                    .plln()
-                    .bits(pllconf.n)
+                    .plldiv()
+                    .bits(pllconf.plldiv.to_bits())
+                    .pllmul()
+                    .bits(pllconf.pllmul.to_bits())
             });
 
             rcc.cr.modify(|_, w| w.pllon().set_bit());
 
             while rcc.cr.read().pllrdy().bit_is_clear() {}
 
-            rcc.pllcfgr.modify(|_, w| w.pllren().set_bit());
+            //rcc.pllcfgr.modify(|_, w| w.pllren().set_bit());
 
             // SW: PLL selected as system clock
             rcc.cfgr.modify(|_, w| unsafe {
@@ -679,8 +676,7 @@ impl CFGR {
 
         // MSI always starts on reset
         if self.msi.is_none() {
-            rcc.cr
-                .modify(|_, w| w.msion().clear_bit().msipllen().clear_bit())
+            rcc.cr.modify(|_, w| w.msion().clear_bit())
         }
 
         //
@@ -692,7 +688,6 @@ impl CFGR {
             lsi: lsi_used,
             lse: self.lse.is_some(),
             msi: self.msi,
-            hsi48: self.hsi48,
             pclk1: Hertz(pclk1),
             pclk2: Hertz(pclk2),
             ppre1: ppre1,
@@ -704,16 +699,59 @@ impl CFGR {
 }
 
 #[derive(Clone, Copy, Debug)]
+/// PLL output multiplier options
+pub enum PllMultiplier {
+    /// Multiplier PLL output by 3
+    Div3 = 0b0000,
+    /// Multiplier PLL output by 4
+    Div4 = 0b0001,
+    /// Multiplier PLL output by 6
+    Div6 = 0b0010,
+    /// Multiplier PLL output by 8
+    Div8 = 0b0011,
+    /// Multiplier PLL output by 12
+    Div12 = 0b0100,
+    /// Multiplier PLL output by 16
+    Div16 = 0b0101,
+    /// Multiplier PLL output by 24
+    Div24 = 0b0110,
+    /// Multiplier PLL output by 32
+    Div32 = 0b0111,
+    /// Multiplier PLL output by 48
+    Div48 = 0b1000,
+}
+
+impl PllMultiplier {
+    #[inline(always)]
+    fn to_bits(self) -> u8 {
+        self as u8
+    }
+
+    #[inline(always)]
+    fn to_multiplication_factor(self) -> u32 {
+        match self {
+            Self::Mul3 => 3,
+            Self::Mul4 => 4,
+            Self::Mul6 => 6,
+            Self::Mul8 => 8,
+            Self::Mul12 => 12,
+            Self::Mul16 => 16,
+            Self::Mul24 => 24,
+            Self::Mul32 => 32,
+            Self::Mul48 => 48,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
 /// PLL output divider options
 pub enum PllDivider {
     /// Divider PLL output by 2
     Div2 = 0b00,
+    /// Divider PLL output by 3
+    Div3 = 0b01,
     /// Divider PLL output by 4
-    Div4 = 0b01,
-    /// Divider PLL output by 6
-    Div6 = 0b10,
-    /// Divider PLL output by 8
-    Div8 = 0b11,
+    Div4 = 0b10,
 }
 
 impl PllDivider {
@@ -726,9 +764,8 @@ impl PllDivider {
     fn to_division_factor(self) -> u32 {
         match self {
             Self::Div2 => 2,
+            Self::Div3 => 3,
             Self::Div4 => 4,
-            Self::Div6 => 6,
-            Self::Div8 => 8,
         }
     }
 }
@@ -736,25 +773,20 @@ impl PllDivider {
 #[derive(Clone, Copy, Debug)]
 /// PLL Configuration
 pub struct PllConfig {
-    // Main PLL division factor
-    m: u8,
     // Main PLL multiplication factor
-    n: u8,
-    // Main PLL division factor for PLLCLK (system clock)
-    r: PllDivider,
+    pllmul: PllMultiplier,
+    // Main PLL division factor
+    plldiv: PllDivider,
 }
 
 impl PllConfig {
     /// Create a new PLL config from manual settings
     ///
-    /// PLL output = ((SourceClk / input_divider) * multiplier) / output_divider
-    pub fn new(input_divider: u8, multiplier: u8, output_divider: PllDivider) -> Self {
-        assert!(input_divider > 0);
-
+    /// PLL output = (SourceClk * multiplier) / divider
+    pub fn new(multiplier: PllMultiplier, divider: PllDivider) -> Self {
         PllConfig {
-            m: input_divider - 1,
-            n: multiplier,
-            r: output_divider,
+            pllmul: multiplier,
+            plldiv: divider,
         }
     }
 }
@@ -762,8 +794,6 @@ impl PllConfig {
 #[derive(Clone, Copy, Debug, PartialEq)]
 /// PLL Source
 pub enum PllSource {
-    /// Multi-speed internal clock
-    MSI,
     /// High-speed internal clock
     HSI16,
     /// High-speed external clock
@@ -773,9 +803,8 @@ pub enum PllSource {
 impl PllSource {
     fn to_pllsrc(self) -> u8 {
         match self {
-            Self::MSI => 0b01,
-            Self::HSI16 => 0b10,
-            Self::HSE => 0b11,
+            Self::HSI16 => 0b0,
+            Self::HSE => 0b1,
         }
     }
 }
@@ -786,7 +815,6 @@ impl PllSource {
 #[derive(Clone, Copy, Debug)]
 pub struct Clocks {
     hclk: Hertz,
-    hsi48: bool,
     msi: Option<MsiFreq>,
     lsi: bool,
     lse: bool,
@@ -802,11 +830,6 @@ impl Clocks {
     /// Returns the frequency of the AHB
     pub fn hclk(&self) -> Hertz {
         self.hclk
-    }
-
-    /// Returns status of HSI48
-    pub fn hsi48(&self) -> bool {
-        self.hsi48
     }
 
     // Returns the status of the MSI
