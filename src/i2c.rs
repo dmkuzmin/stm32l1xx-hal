@@ -1,13 +1,13 @@
-//! I2C
+//! Inter-Integrated Circuit (I2C) bus
 
 use crate::stm32::{I2C1, I2C2};
 use cast::u8;
 
 use crate::gpio::gpiob::{PB10, PB11, PB6, PB7, PB8, PB9};
-use crate::gpio::AF4;
+use crate::gpio::{Alternate, OpenDrain, Output, AF4};
+use crate::hal::blocking::i2c::{Read, Write, WriteRead};
 use crate::rcc::{Clocks, APB1};
 use crate::time::Hertz;
-use hal::blocking::i2c::{Write, WriteRead};
 
 /// I2C error
 #[derive(Debug)]
@@ -525,5 +525,112 @@ pub trait I2cExt<I2C> {
         T: Into<Hertz>;
 }
 
-i2c!(I2C1, i2c1, i2c1en, i2c1rst);
-i2c!(I2C2, i2c2, i2c2en, i2c2rst);
+macro_rules! busy_wait {
+    ($i2c:expr, $flag:ident) => {
+        loop {
+            let sr1 = $i2c.sr1.read();
+
+            if sr1.berr().bit_is_set() {
+                return Err(Error::Bus);
+            } else if sr1.arlo().bit_is_set() {
+                return Err(Error::Arbitration);
+            } else if sr1.af().bit_is_set() {
+                return Err(Error::Nack);
+            } else if sr1.$flag().bit_is_set() {
+                break;
+            } else {
+                // try again
+            }
+        }
+    };
+}
+
+macro_rules! hal {
+    ($($I2CX:ident: ($i2cX:ident, $i2cXen:ident, $i2cXrst:ident),)+) => {
+        $(
+            impl<SCL, SDA> I2c<$I2CX, (SCL, SDA)> {
+                /// Configures the I2C peripheral to work in master mode
+                pub fn $i2cX<F>(
+                    i2c: $I2CX,
+                    pins: (SCL, SDA),
+                    freq: F,
+                    clocks: Clocks,
+                    apb1: &mut APB1R1,
+                ) -> Self where
+                    F: Into<Hertz>,
+                    SCL: SclPin<$I2CX>,
+                    SDA: SdaPin<$I2CX>,
+                {
+                    apb1.enr().modify(|_, w| w.$i2cXen().set_bit());
+                    apb1.rstr().modify(|_, w| w.$i2cXrst().set_bit());
+                    apb1.rstr().modify(|_, w| w.$i2cXrst().clear_bit());
+
+                    let freq = freq.into().0;
+
+                    assert!(freq <= 400_000);
+
+                     // TODO review compliance with the timing requirements of I2C
+                    // t_I2CCLK = 1 / PCLK1
+                    // t_PRESC  = (PRESC + 1) * t_I2CCLK
+                    // t_SCLL   = (SCLL + 1) * t_PRESC
+                    // t_SCLH   = (SCLH + 1) * t_PRESC
+                    //
+                    // t_SYNC1 + t_SYNC2 > 4 * t_I2CCLK
+                    // t_SCL ~= t_SYNC1 + t_SYNC2 + t_SCLL + t_SCLH
+                    let i2cclk = clocks.pclk1().0;
+                    let ratio = i2cclk / freq - 4;
+                    let (presc, scll, sclh, sdadel, scldel) = if freq >= 100_000 {
+                        // fast-mode
+                        // here we pick SCLL + 1 = 2 * (SCLH + 1)
+                        let presc = ratio / 387;
+
+                        let sclh = ((ratio / (presc + 1)) - 3) / 3;
+                        let scll = 2 * (sclh + 1) - 1;
+
+                        // fast-mode
+                        let sdadel = i2cclk / 8_000_000 / (presc + 1);
+                        let scldel = i2cclk / 2_000_000 / (presc + 1) - 1;
+
+                        (presc, scll, sclh, sdadel, scldel)
+                    } else {
+                        // standard-mode
+                        // here we pick SCLL = SCLH
+                        let presc = ratio / 514;
+
+                        let sclh = ((ratio / (presc + 1)) - 2) / 2;
+                        let scll = sclh;
+
+                        let sdadel = i2cclk / 2_000_000 / (presc + 1);
+                        let scldel = i2cclk / 800_000 / (presc + 1) - 1;
+
+                        (presc, scll, sclh, sdadel, scldel)
+                    };
+
+                    let presc = u8(presc).unwrap();
+                    assert!(presc < 16);
+                    let scldel = u8(scldel).unwrap();
+                    assert!(scldel < 16);
+                    let sdadel = u8(sdadel).unwrap();
+                    assert!(sdadel < 16);
+                    let sclh = u8(sclh).unwrap();
+                    let scll = u8(scll).unwrap();
+
+                    // Configure for "fast mode" (400 KHz)
+                    i2c.timingr.write(|w| {
+                        w.presc()
+                            .bits(presc)
+                            .scll()
+                            .bits(scll)
+                            .sclh()
+                            .bits(sclh)
+                            .sdadel()
+                            .bits(sdadel)
+                            .scldel()
+                            .bits(scldel)
+                    });
+                }
+
+hal! {
+    I2C1: (i2c1, i2c1en, i2c1rst),
+    I2C2: (i2c2, i2c2en, i2c2rst),
+}
