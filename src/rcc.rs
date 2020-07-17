@@ -1,7 +1,7 @@
 //! Reset and Clock Control
 
-use crate::flash::ACR;
-use crate::pwr::Pwr;
+//use crate::flash::ACR;
+//use crate::pwr::Pwr;
 use crate::stm32::{rcc, RCC};
 use crate::time::Hertz;
 use cast::u32;
@@ -50,14 +50,11 @@ impl RccExt for RCC {
             ahb: AHB { _0: () },
             apb1: APB1 { _0: () },
             apb2: APB2 { _0: () },
-            bdcr: BDCR { _0: () },
             csr: CSR { _0: () },
-            crrcr: CRRCR { _0: () },
             cfgr: CFGR {
                 hse: None,
                 lse: None,
                 msi: None,
-                hsi48: false,
                 lsi: false,
                 hclk: None,
                 pclk1: None,
@@ -80,12 +77,8 @@ pub struct Rcc {
     pub apb2: APB2,
     /// Clock configuration register
     pub cfgr: CFGR,
-    /// Backup domain control register
-    pub bdcr: BDCR,
     /// Control/Status Register
     pub csr: CSR,
-    /// Clock recovery RC register
-    pub crrcr: CRRCR,
 }
 
 /// CSR Control/Status Register
@@ -99,44 +92,6 @@ impl CSR {
     pub(crate) fn csr(&mut self) -> &rcc::CSR {
         // NOTE(unsafe) this proxy grants exclusive access to this register
         unsafe { &(*RCC::ptr()).csr }
-    }
-}
-
-/// Clock recovery RC register
-pub struct CRRCR {
-    _0: (),
-}
-
-impl CRRCR {
-    // TODO remove `allow`
-    #[allow(dead_code)]
-    pub(crate) fn crrcr(&mut self) -> &rcc::CRRCR {
-        // NOTE(unsafe) this proxy grants exclusive access to this register
-        unsafe { &(*RCC::ptr()).crrcr }
-    }
-
-    /// Checks if the 48 MHz HSI is enabled
-    pub fn is_hsi48_on(&mut self) -> bool {
-        self.crrcr().read().hsi48on().bit()
-    }
-
-    /// Checks if the 48 MHz HSI is ready
-    pub fn is_hsi48_ready(&mut self) -> bool {
-        self.crrcr().read().hsi48rdy().bit()
-    }
-}
-
-/// BDCR Backup domain control register registers
-pub struct BDCR {
-    _0: (),
-}
-
-impl BDCR {
-    // TODO remove `allow`
-    #[allow(dead_code)]
-    pub(crate) fn enr(&mut self) -> &rcc::BDCR {
-        // NOTE(unsafe) this proxy grants exclusive access to this register
-        unsafe { &(*RCC::ptr()).bdcr }
     }
 }
 
@@ -213,8 +168,6 @@ struct LseConfig {
     /// If the clock driving circuitry is bypassed i.e. using an oscillator, not a crystal or
     /// resonator
     bypass: CrystalBypass,
-    /// Clock Security System enable/disable
-    css: ClockSecuritySystem,
 }
 
 /// Crystal bypass selector
@@ -246,7 +199,6 @@ pub struct CFGR {
     hse: Option<HseConfig>,
     lse: Option<LseConfig>,
     msi: Option<MsiFreq>,
-    hsi48: bool,
     lsi: bool,
     hclk: Option<u32>,
     pclk1: Option<u32>,
@@ -272,11 +224,8 @@ impl CFGR {
     }
 
     /// Add an 32.768 kHz LSE to the system
-    pub fn lse(mut self, bypass: CrystalBypass, css: ClockSecuritySystem) -> Self {
-        self.lse = Some(LseConfig {
-            bypass: bypass,
-            css: css,
-        });
+    pub fn lse(mut self, bypass: CrystalBypass) -> Self {
+        self.lse = Some(LseConfig { bypass: bypass });
 
         self
     }
@@ -287,12 +236,6 @@ impl CFGR {
         F: Into<Hertz>,
     {
         self.hclk = Some(freq.into().0);
-        self
-    }
-
-    /// Enable the 48 MHz USB, RNG, SDMMC HSI clock source. Not available on all stm32l4x6 series
-    pub fn hsi48(mut self, on: bool) -> Self {
-        self.hsi48 = on;
         self
     }
 
@@ -352,7 +295,7 @@ impl CFGR {
     }
 
     /// Freezes the clock configuration, making it effective
-    pub fn freeze(&self, acr: &mut ACR, pwr: &mut Pwr) -> Clocks {
+    pub fn freeze(&self, acr: &mut ACR) -> Clocks {
         let rcc = unsafe { &*RCC::ptr() };
 
         //
@@ -361,14 +304,7 @@ impl CFGR {
 
         // Turn on the internal 32 kHz LSI oscillator
         let lsi_used = match (self.lsi, &self.lse) {
-            (true, _)
-            | (
-                _,
-                &Some(LseConfig {
-                    bypass: _,
-                    css: ClockSecuritySystem::Enable,
-                }),
-            ) => {
+            (true, _) | (_, &Some(LseConfig { bypass: _ })) => {
                 rcc.csr.modify(|_, w| w.lsion().set_bit());
 
                 // Wait until LSI is running
@@ -381,18 +317,14 @@ impl CFGR {
 
         if let Some(lse_cfg) = &self.lse {
             // 1. Unlock the backup domain
-            pwr.cr1.reg().modify(|_, w| w.dbp().set_bit());
+            //pwr.cr1.reg().modify(|_, w| w.dbp().set_bit());
 
             // 2. Setup the LSE
-            rcc.bdcr.modify(|_, w| {
+            rcc.csr.modify(|_, w| {
                 w.lseon().set_bit(); // Enable LSE
 
                 if lse_cfg.bypass == CrystalBypass::Enable {
                     w.lsebyp().set_bit();
-                } else {
-                    unsafe {
-                        w.lsedrv().bits(0b11);
-                    } // Max drive strength, TODO: should probably be settable
                 }
 
                 w
@@ -400,13 +332,6 @@ impl CFGR {
 
             // Wait until LSE is running
             while rcc.bdcr.read().lserdy().bit_is_clear() {}
-
-            // Setup CSS
-            if lse_cfg.css == ClockSecuritySystem::Enable {
-                // Enable CSS and interrupt
-                rcc.bdcr.modify(|_, w| w.lsecsson().set_bit());
-                rcc.cier.modify(|_, w| w.lsecssie().set_bit());
-            }
         }
 
         // If HSE is available, set it up
@@ -431,40 +356,11 @@ impl CFGR {
         }
 
         if let Some(msi) = self.msi {
-            unsafe {
-                rcc.cr.modify(|_, w| {
-                    w.msirange()
-                        .bits(msi as u8)
-                        .msirgsel()
-                        .set_bit()
-                        .msion()
-                        .set_bit();
-
-                    // If LSE is enabled, enable calibration of MSI
-                    if let Some(_) = self.lse {
-                        w.msipllen().set_bit();
-                    }
-
-                    w
-                })
-            };
+            unsafe { rcc.icsr.modify(|_, w| w.msirange().bits(msi as u8)) };
+            unsafe { rcc.cr.modify(|_, w| w.msion().set_bit()) };
 
             // Wait until MSI is running
             while rcc.cr.read().msirdy().bit_is_clear() {}
-        }
-
-        // Turn on USB, RNG Clock using the HSI48 CLK source
-        if self.hsi48 {
-            // p. 180 in ref-manual
-            rcc.crrcr.modify(|_, w| w.hsi48on().set_bit());
-
-            // Wait until HSI48 is running
-            while rcc.crrcr.read().hsi48rdy().bit_is_clear() {}
-        }
-
-        // Select MSI as clock source for usb48, rng ...
-        if let Some(MsiFreq::RANGE48M) = self.msi {
-            unsafe { rcc.ccipr.modify(|_, w| w.clk48sel().bits(0b11)) };
         }
 
         //
@@ -482,13 +378,6 @@ impl CFGR {
                     }
                 }
                 PllSource::HSI16 => (HSI, source),
-                PllSource::MSI => {
-                    if let Some(msi) = self.msi {
-                        (msi.to_hertz().0, source)
-                    } else {
-                        panic!("MSI selected as PLL source, but not enabled");
-                    }
-                }
             }
         } else {
             // No specific PLL source selected, do educated guess
@@ -516,9 +405,10 @@ impl CFGR {
         let pllconf = if self.pll_config.is_none() {
             if let Some(sysclk) = self.sysclk {
                 // Calculate PLL multiplier and create a best effort pll config, just multiply n
-                let plln = (2 * sysclk) / clock_speed;
+                //let plln = (2 * sysclk) / clock_speed;
 
-                Some(PllConfig::new(1, plln as u8, PllDivider::Div2))
+                // TODO pllmul
+                Some(PllConfig::new(PllMultiplier::Mul4, PllDivider::Div4))
             } else {
                 None
             }
@@ -528,7 +418,7 @@ impl CFGR {
 
         let sysclk = self.sysclk.unwrap_or(HSI);
 
-        assert!(sysclk <= 80_000_000);
+        assert!(sysclk <= 32_000_000);
 
         let (hpre_bits, hpre_div) = self
             .hclk
@@ -586,34 +476,35 @@ impl CFGR {
         assert!(pclk2 <= sysclk);
 
         // adjust flash wait states
+        /*unsafe { acr.acr().write(|w| w.acc64().set_bit()) }
+
+        // adjust flash wait states
         unsafe {
             acr.acr().write(|w| {
-                w.latency().bits(if sysclk <= 24_000_000 {
-                    0b000
-                } else if sysclk <= 48_000_000 {
-                    0b001
+                if sysclk <= 24_000_000 {
+                    w.latency().clear_bit()
                 } else {
-                    0b010
-                })
+                    w.latency().set_bit()
+                }
             })
         }
+
+        // adjust flash wait states
+        unsafe { acr.acr().write(|w| w.acc64().clear_bit()) }*/
 
         let sysclk_src_bits;
         if let Some(pllconf) = pllconf {
             // Sanity-checks per RM0394, 6.4.4 PLL configuration register (RCC_PLLCFGR)
-            let r = pllconf.r.to_division_factor();
-            let clock_speed = clock_speed / (pllconf.m as u32 + 1);
-            let vco = clock_speed * pllconf.n as u32;
-            let output_clock = vco / r;
+            //let r = pllconf.r.to_division_factor();
+            //let clock_speed = clock_speed / (pllconf.m as u32 + 1);
+            let vco = clock_speed * pllconf.pllmul.to_multiplication_factor();
+            let output_clock = vco / pllconf.plldiv.to_division_factor();
 
-            assert!(r <= 8); // Allowed max output divider
-            assert!(pllconf.n >= 8); // Allowed min multiplier
-            assert!(pllconf.n <= 86); // Allowed max multiplier
-            assert!(clock_speed >= 4_000_000); // VCO input clock min
-            assert!(clock_speed <= 16_000_000); // VCO input clock max
-            assert!(vco >= 64_000_000); // VCO output min
-            assert!(vco <= 334_000_000); // VCO output max
-            assert!(output_clock <= 80_000_000); // Max output clock
+            assert!(clock_speed >= 2_000_000); // VCO input clock min
+            assert!(clock_speed <= 24_000_000); // VCO input clock max
+            assert!(vco >= 6_000_000); // VCO output min
+            assert!(vco <= 96_000_000); // VCO output max
+            assert!(output_clock <= 32_000_000); // Max output clock
 
             // use PLL as source
             sysclk_src_bits = 0b11;
@@ -702,23 +593,23 @@ impl CFGR {
 /// PLL output multiplier options
 pub enum PllMultiplier {
     /// Multiplier PLL output by 3
-    Div3 = 0b0000,
+    Mul3 = 0b0000,
     /// Multiplier PLL output by 4
-    Div4 = 0b0001,
+    Mul4 = 0b0001,
     /// Multiplier PLL output by 6
-    Div6 = 0b0010,
+    Mul6 = 0b0010,
     /// Multiplier PLL output by 8
-    Div8 = 0b0011,
+    Mul8 = 0b0011,
     /// Multiplier PLL output by 12
-    Div12 = 0b0100,
+    Mul12 = 0b0100,
     /// Multiplier PLL output by 16
-    Div16 = 0b0101,
+    Mul16 = 0b0101,
     /// Multiplier PLL output by 24
-    Div24 = 0b0110,
+    Mul24 = 0b0110,
     /// Multiplier PLL output by 32
-    Div32 = 0b0111,
+    Mul32 = 0b0111,
     /// Multiplier PLL output by 48
-    Div48 = 0b1000,
+    Mul48 = 0b1000,
 }
 
 impl PllMultiplier {
