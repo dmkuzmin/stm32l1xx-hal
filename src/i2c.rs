@@ -180,7 +180,7 @@ macro_rules! hal {
                     // Also wait until signalled we're master and everything is waiting for us
                     while {
                         let sr2 = self.i2c.sr2.read();
-                        sr2.msl().bit_is_clear() && sr2.busy().bit_is_clear()
+                        sr2.busy().bit_is_set()
                     } {}
 
                     // clear POS and set ACK, START bits
@@ -227,19 +227,21 @@ macro_rules! hal {
                     loop {
                         match iter.next() {
                             Some(byte) => {
-                                if iter.size_hint() <= 3 {
-                                    if iter.size_hint() == 1 {
+                                if iter.size_hint().0 <= 3 {
+                                    if iter.size_hint().0 == 1 {
                                         // Wait until we have received something
                                         busy_wait!(self.i2c, rx_ne);
                                         *byte = self.i2c.dr.read().bits() as u8;
-                                    } else if iter.size_hint() == 2 {
+                                    } else if iter.size_hint().0 == 2 {
                                         // Wait until BTF
                                         busy_wait!(self.i2c, btf);
                                         // Send STOP condition
                                         self.i2c.cr1.modify(|_, w| w.stop().set_bit());
                                         *byte = self.i2c.dr.read().bits() as u8;
-                                        byte = iter.next();
-                                        *byte = self.i2c.dr.read().bits() as u8; 
+                                        match iter.next() {
+                                            Some(byte) => *byte = self.i2c.dr.read().bits() as u8,
+                                            None => break,
+                                        }
                                         break;
                                     } else {
                                         // Wait until BTF
@@ -251,20 +253,25 @@ macro_rules! hal {
                                         busy_wait!(self.i2c, btf);
                                         // Send STOP condition
                                         self.i2c.cr1.modify(|_, w| w.stop().set_bit());
-                                        byte = iter.next();
-                                        *byte = self.i2c.dr.read().bits() as u8;
-                                        byte = iter.next();
-                                        *byte = self.i2c.dr.read().bits() as u8;
+                                        match iter.next() {
+                                            Some(byte) => *byte = self.i2c.dr.read().bits() as u8,
+                                            None => break,
+                                        }
+                                        match iter.next() {
+                                            Some(byte) => *byte = self.i2c.dr.read().bits() as u8,
+                                            None => break,
+                                        }
                                         break;
                                     }
                                 } else {
                                     // Wait until we have received something
                                     busy_wait!(self.i2c, rx_ne);
                                     *byte = self.i2c.dr.read().bits() as u8;
-                                    if self.i2c.sr1.btf.read().is_set_bit()
-                                    {
-                                        byte = iter.next();
-                                        *byte = self.i2c.dr.read().bits() as u8;
+                                    if self.i2c.sr1.read().btf().bit_is_set() {
+                                        match iter.next() {
+                                            Some(byte) => *byte = self.i2c.dr.read().bits() as u8,
+                                            None => break,
+                                        }
                                     }
                                 }
                             },
@@ -330,7 +337,7 @@ macro_rules! hal {
                     // Also wait until signalled we're master and everything is waiting for us
                     while {
                         let sr2 = self.i2c.sr2.read();
-                        sr2.msl().bit_is_clear() && sr2.busy().bit_is_clear()
+                        sr2.busy().bit_is_set()
                     } {}
 
                     // Send a START condition
