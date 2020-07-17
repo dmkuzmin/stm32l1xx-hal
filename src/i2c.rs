@@ -227,12 +227,12 @@ macro_rules! hal {
                     loop {
                         match iter.next() {
                             Some(byte) => {
-                                if iter.size_hint().0 <= 3 {
-                                    if iter.size_hint().0 == 1 {
+                                if iter.size_hint().0 <= 2 {
+                                    if iter.size_hint().0 == 0 {
                                         // Wait until we have received something
                                         busy_wait!(self.i2c, rx_ne);
                                         *byte = self.i2c.dr.read().bits() as u8;
-                                    } else if iter.size_hint().0 == 2 {
+                                    } else if iter.size_hint().0 == 1 {
                                         // Wait until BTF
                                         busy_wait!(self.i2c, btf);
                                         // Send STOP condition
