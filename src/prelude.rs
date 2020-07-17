@@ -7,4 +7,3 @@ pub use crate::i2c::I2cExt as _stm32l1xx_hal_i2c_I2Ext;
 pub use crate::rcc::RccExt as _stm32l1xx_hal_rcc_RccExt;
 pub use crate::time::MonoTimerExt as _stm32l1xx_hal_time_MonoTimerExt;
 pub use crate::time::U32Ext as _stm32l1xx_hal_time_U32Ext;
-pub use crate::timer::TimerExt as _stm32l1xx_hal_timer_TimerExt;

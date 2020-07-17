@@ -41,4 +41,3 @@ pub mod i2c;
 pub mod prelude;
 pub mod rcc;
 pub mod time;
-pub mod timer;
