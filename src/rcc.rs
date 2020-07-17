@@ -295,7 +295,7 @@ impl CFGR {
     }
 
     /// Freezes the clock configuration, making it effective
-    pub fn freeze(&self, acr: &mut ACR) -> Clocks {
+    pub fn freeze(&self/*, acr: &mut ACR*/) -> Clocks {
         let rcc = unsafe { &*RCC::ptr() };
 
         //
@@ -331,7 +331,7 @@ impl CFGR {
             });
 
             // Wait until LSE is running
-            while rcc.bdcr.read().lserdy().bit_is_clear() {}
+            while rcc.csr.read().lserdy().bit_is_clear() {}
         }
 
         // If HSE is available, set it up
@@ -356,7 +356,7 @@ impl CFGR {
         }
 
         if let Some(msi) = self.msi {
-            unsafe { rcc.icsr.modify(|_, w| w.msirange().bits(msi as u8)) };
+            unsafe { rcc.icscr.modify(|_, w| w.msirange().bits(msi as u8)) };
             unsafe { rcc.cr.modify(|_, w| w.msion().set_bit()) };
 
             // Wait until MSI is running
@@ -386,11 +386,7 @@ impl CFGR {
             if let Some(hse) = &self.hse {
                 (hse.speed, PllSource::HSE)
             }
-            // 2. MSI
-            else if let Some(msi) = self.msi {
-                (msi.to_hertz().0, PllSource::MSI)
-            }
-            // 3. HSI as fallback
+            // 2. HSI as fallback
             else {
                 (HSI, PllSource::HSI16)
             }
@@ -511,11 +507,11 @@ impl CFGR {
             rcc.cr.modify(|_, w| w.pllon().clear_bit());
             while rcc.cr.read().pllrdy().bit_is_set() {}
 
-            let pllsrc_bits = pll_source.to_pllsrc();
+            let pllsrc_bit = pll_source.to_pllsrc();
 
             rcc.cfgr.modify(|_, w| unsafe {
                 w.pllsrc()
-                    .bits(pllsrc_bits)
+                    .bit(pllsrc_bit)
                     .plldiv()
                     .bits(pllconf.plldiv.to_bits())
                     .pllmul()
@@ -692,10 +688,10 @@ pub enum PllSource {
 }
 
 impl PllSource {
-    fn to_pllsrc(self) -> u8 {
+    fn to_pllsrc(self) -> bool {
         match self {
-            Self::HSI16 => 0b0,
-            Self::HSE => 0b1,
+            Self::HSI16 => false,
+            Self::HSE => true,
         }
     }
 }

@@ -38,7 +38,7 @@ impl Delay {
 impl DelayMs<u32> for Delay {
     type Error = Error;
 
-    fn try_delay_ms(&mut self, ms: u32) -> Result<Self, Error> {
+    fn try_delay_ms(&mut self, ms: u32) -> Result<(), Error> {
         self.try_delay_us(ms * 1_000)
     }
 }
@@ -46,7 +46,7 @@ impl DelayMs<u32> for Delay {
 impl DelayMs<u16> for Delay {
     type Error = Error;
 
-    fn try_delay_ms(&mut self, ms: u16) -> Result<Self, Error> {
+    fn try_delay_ms(&mut self, ms: u16) -> Result<(), Error> {
         self.try_delay_ms(u32(ms))
     }
 }
@@ -54,7 +54,7 @@ impl DelayMs<u16> for Delay {
 impl DelayMs<u8> for Delay {
     type Error = Error;
 
-    fn try_delay_ms(&mut self, ms: u8) -> Result<Self, Error> {
+    fn try_delay_ms(&mut self, ms: u8) -> Result<(), Error> {
         self.try_delay_ms(u32(ms))
     }
 }
@@ -62,21 +62,21 @@ impl DelayMs<u8> for Delay {
 impl DelayUs<u32> for Delay {
     type Error = Error;
 
-    fn try_delay_us(&mut self, us: u32) -> Result<Self, Error> {
-        let t0 = self.dwt.get_cycle_count();
+    fn try_delay_us(&mut self, us: u32) -> Result<(), Error> {
+        let t0 = DWT::get_cycle_count();
         let rvr = match us.checked_mul(self.clocks.sysclk().0 / 1_000_000) {
             Some(rvr) => rvr,
-            None => return Err(nb::Error::Other(Error::Parity)),
+            None => return Err(Error::Overflow),
         };
-        while self.dwt.get_cycle_count().wrapping_sub(t0) < rvr {}
-        Ok(Self)
+        while DWT::get_cycle_count().wrapping_sub(t0) < rvr {}
+        Ok(())
     }
 }
 
 impl DelayUs<u16> for Delay {
     type Error = Error;
 
-    fn try_delay_us(&mut self, us: u16) -> Result<Self, Error> {
+    fn try_delay_us(&mut self, us: u16) -> Result<(), Error> {
         self.try_delay_us(u32(us))
     }
 }
@@ -84,7 +84,7 @@ impl DelayUs<u16> for Delay {
 impl DelayUs<u8> for Delay {
     type Error = Error;
 
-    fn try_delay_us(&mut self, us: u8) -> Result<Self, Error> {
+    fn try_delay_us(&mut self, us: u8) -> Result<(), Error> {
         self.try_delay_us(u32(us))
     }
 }

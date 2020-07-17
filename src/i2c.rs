@@ -5,7 +5,7 @@ use cast::u8;
 
 use crate::gpio::gpiob::{PB10, PB11, PB6, PB7, PB8, PB9};
 use crate::gpio::{Alternate, OpenDrain, Output, AF4};
-use crate::hal::blocking::i2c::{Read, Write, WriteIter, WriteIterRead, WriteRead};
+use crate::hal::blocking::i2c::{Read, Write, WriteRead};
 use crate::rcc::{Clocks, APB1};
 use crate::time::Hertz;
 
@@ -106,7 +106,7 @@ macro_rules! hal {
                     // Configure bus frequency into I2C peripheral
                     i2c.cr2.write(|w| unsafe { w.freq().bits(freq as u8) });
 
-                    let trise = if speed <= 100_u32.khz().into() {
+                    let trise = if speed <= 100_000 {
                         freq + 1
                     } else {
                         (freq * 300) / 1000 + 1
@@ -116,9 +116,9 @@ macro_rules! hal {
                     i2c.trise.write(|w| w.trise().bits(trise as u8));
 
                     // I2C clock control calculation
-                    if speed <= 100_u32.khz().into() {
+                    if speed <= 100_000 {
                         let ccr = {
-                            let ccr = clock / (speed.0 * 2);
+                            let ccr = clock / (speed * 2);
                             if ccr < 4 {
                                 4
                             } else {
@@ -138,7 +138,7 @@ macro_rules! hal {
                     } else {
                         const DUTYCYCLE: u8 = 0;
                         if DUTYCYCLE == 0 {
-                            let ccr = clock / (speed.0 * 3);
+                            let ccr = clock / (speed * 3);
                             let ccr = if ccr < 1 { 1 } else { ccr };
 
                             // Set clock to fast mode with appropriate parameters for selected speed (2:1 duty cycle)
@@ -146,7 +146,7 @@ macro_rules! hal {
                                 w.f_s().set_bit().duty().clear_bit().ccr().bits(ccr as u16)
                             });
                         } else {
-                            let ccr = clock / (speed.0 * 25);
+                            let ccr = clock / (speed * 25);
                             let ccr = if ccr < 1 { 1 } else { ccr };
 
                             // Set clock to fast mode with appropriate parameters for selected speed (16:9 duty cycle)
@@ -177,36 +177,141 @@ macro_rules! hal {
                     buffer: &mut [u8]
                 ) -> Result<(), Self::Error>
                 {
-                    // Send a START condition and set ACK bit
-                    self.i2c.cr1.modify(|_, w| w.start().set_bit().ack().set_bit());
-
-                    // Wait until START condition was generated
-                    busy_wait!(self.i2c, sb);
-
                     // Also wait until signalled we're master and everything is waiting for us
                     while {
                         let sr2 = self.i2c.sr2.read();
                         sr2.msl().bit_is_clear() && sr2.busy().bit_is_clear()
                     } {}
 
+                    // clear POS and set ACK, START bits
+                    self.i2c.cr1.modify(|_, w| unsafe {
+                        w.pos()
+                            .clear_bit()
+                            .ack()
+                            .set_bit()
+                            .start()
+                            .set_bit()
+                    });
+
+                    // Wait until START condition was generated
+                    busy_wait!(self.i2c, sb);
+
                     // Set up current address, we're trying to talk to
                     self.i2c.dr.write(|w| unsafe { w.bits((u32::from(address) << 1) + 1) });
 
                     // Wait until address was sent
-                    busy_wait!(self.i2c, address);
+                    busy_wait!(self.i2c, addr);
 
-                    // Clear condition by reading SR2
-                    self.i2c.sr2.read();
-
-                    for byte in buffer {
-                        // Wait until we have received something
-                        busy_wait!(self.i2c, rx_ne);
-
-                        *byte = self.i2c.dr.read().bits() as u8;
+                    if buffer.len() == 1 {
+                        // clear ACK bit
+                        self.i2c.cr1.modify(|_, w| w.ack().clear_bit());
+                        // Clear condition by reading SR2
+                        self.i2c.sr2.read();
+                        // Send STOP condition
+                        self.i2c.cr1.modify(|_, w| w.stop().set_bit());
+                    } else if buffer.len() == 2 {
+                        // clear ACK bit
+                        self.i2c.cr1.modify(|_, w| w.ack().clear_bit());
+                        // POS
+                        self.i2c.cr1.modify(|_, w| w.pos().set_bit());
+                        // Clear condition by reading SR2
+                        self.i2c.sr2.read();
+                    } else {
+                        // set ACK bit
+                        self.i2c.cr1.modify(|_, w| w.ack().set_bit());
+                        // Clear condition by reading SR2
+                        self.i2c.sr2.read();
                     }
 
-                    // Send STOP condition
-                    self.i2c.cr1.modify(|_, w| w.stop().set_bit());
+                    let mut iter = IntoIterator::into_iter(buffer);
+                    loop {
+                        match iter.next() {
+                            Some(byte) => {
+                                if iter.size_hint() <= 3 {
+                                    if iter.size_hint() == 1 {
+                                        // Wait until we have received something
+                                        busy_wait!(self.i2c, rx_ne);
+                                        *byte = self.i2c.dr.read().bits() as u8;
+                                    } else if iter.size_hint() == 2 {
+                                        // Wait until BTF
+                                        busy_wait!(self.i2c, btf);
+                                        // Send STOP condition
+                                        self.i2c.cr1.modify(|_, w| w.stop().set_bit());
+                                        *byte = self.i2c.dr.read().bits() as u8;
+                                        byte = iter.next();
+                                        *byte = self.i2c.dr.read().bits() as u8; 
+                                        break;
+                                    } else {
+                                        // Wait until BTF
+                                        busy_wait!(self.i2c, btf);
+                                        // Send a START condition and set ACK bit
+                                        self.i2c.cr1.modify(|_, w| w.ack().clear_bit());
+                                        *byte = self.i2c.dr.read().bits() as u8;
+                                        // Wait until BTF
+                                        busy_wait!(self.i2c, btf);
+                                        // Send STOP condition
+                                        self.i2c.cr1.modify(|_, w| w.stop().set_bit());
+                                        byte = iter.next();
+                                        *byte = self.i2c.dr.read().bits() as u8;
+                                        byte = iter.next();
+                                        *byte = self.i2c.dr.read().bits() as u8;
+                                        break;
+                                    }
+                                } else {
+                                    // Wait until we have received something
+                                    busy_wait!(self.i2c, rx_ne);
+                                    *byte = self.i2c.dr.read().bits() as u8;
+                                    if self.i2c.sr1.btf.read().is_set_bit()
+                                    {
+                                        byte = iter.next();
+                                        *byte = self.i2c.dr.read().bits() as u8;
+                                    }
+                                }
+                            },
+                            None => break,
+                        }
+                    }
+                    /*for byte in buffer {
+                        if buffer.len() <= 3 {
+                            if buffer.len() == 1 {
+                                // Wait until we have received something
+                                busy_wait!(self.i2c, rx_ne);
+                                *byte = self.i2c.dr.read().bits() as u8;
+                            } else if buffer.len() == 2 {
+                                // Wait until BTF
+                                busy_wait!(self.i2c, btf);
+                                // Send STOP condition
+                                self.i2c.cr1.modify(|_, w| w.stop().set_bit());
+                                *byte = self.i2c.dr.read().bits() as u8;
+                                byte = byte + 1;
+                                *byte = self.i2c.dr.read().bits() as u8;
+                                break;
+                            } else {
+                                // Wait until BTF
+                                busy_wait!(self.i2c, btf);
+                                // Send a START condition and set ACK bit
+                                self.i2c.cr1.modify(|_, w| w.ack().clear_bit());
+                                *byte = self.i2c.dr.read().bits() as u8;
+                                // Wait until BTF
+                                busy_wait!(self.i2c, btf);
+                                // Send STOP condition
+                                self.i2c.cr1.modify(|_, w| w.stop().set_bit());
+                                *byte = self.i2c.dr.read().bits() as u8;
+                                byte = byte + 1;
+                                *byte = self.i2c.dr.read().bits() as u8;
+                                break;
+                            }
+                        } else {
+                            // Wait until we have received something
+                            busy_wait!(self.i2c, rx_ne);
+                            *byte = self.i2c.dr.read().bits() as u8;
+                            if self.i2c.sr1.btf.read().is_set_bit()
+                            {
+                                byte = byte + 1;
+                                *byte = self.i2c.dr.read().bits() as u8;
+                            }
+                        }
+                    }*/
 
                     // Fallthrough is success
                     Ok(())
@@ -222,28 +327,30 @@ macro_rules! hal {
                     bytes: &[u8]
                 ) -> Result<(), Self::Error>
                 {
-                    // TODO support transfers of more than 255 bytes
-                    //assert!(bytes.len() < 256 && bytes.len() > 0);
-
-                    // Send a START condition
-                    self.i2c.cr1.modify(|_, w| w.start().set_bit());
-
-                    // Wait until START condition was generated
-                    busy_wait!(self.i2c, sb);
-
                     // Also wait until signalled we're master and everything is waiting for us
                     while {
                         let sr2 = self.i2c.sr2.read();
                         sr2.msl().bit_is_clear() && sr2.busy().bit_is_clear()
                     } {}
 
+                    // Send a START condition
+                    self.i2c.cr1.modify(|_, w| unsafe {
+                        w.pos()
+                            .clear_bit()
+                            .start()
+                            .set_bit()
+                    });
+
+                    // Wait until START condition was generated
+                    busy_wait!(self.i2c, sb);
+
                     // Set up current address, we're trying to talk to
                     self.i2c.dr.write(|w| unsafe { w.bits(u32::from(address) << 1) });
 
                     // Wait until address was sent
-                    busy_wait!(self.i2c, address);
+                    busy_wait!(self.i2c, addr);
 
-                    // Clear condition by reading SR2
+                    // Clear addr flag by reading SR2 after SR1
                     self.i2c.sr2.read();
 
                     for byte in bytes {
@@ -251,21 +358,21 @@ macro_rules! hal {
                         busy_wait!(self.i2c, tx_e);
 
                         // put byte on the wire
-                        self.i2c.dr.write(|w| { w.bits(u32::from(byte)) });
+                        self.i2c.dr.write(|w| unsafe { w.bits(u32::from(*byte)) });
 
                         // While until byte is transferred
                         busy_wait!(self.i2c, btf);
                     }
 
                     // Send STOP condition
-                    //self.i2c.cr1.modify(|_, w| w.stop().set_bit());
+                    self.i2c.cr1.modify(|_, w| w.stop().set_bit());
 
                     // Fallthrough is success
                     Ok(())
                 }
             }
 
-            impl<PINS> WriteIter for I2c<$I2CX, PINS> {
+            /*impl<PINS> WriteIter for I2c<$I2CX, PINS> {
                 type Error = Error;
 
                 //fn try_write_iter<B>(
@@ -317,7 +424,7 @@ macro_rules! hal {
                     // Fallthrough is success
                     Ok(())
                 }
-            }
+            }*/
 
             impl<PINS> WriteRead for I2c<$I2CX, PINS> {
                 type Error = Error;
@@ -334,7 +441,7 @@ macro_rules! hal {
                 }
             }
 
-            impl<PINS> WriteIterRead for I2c<$I2CX, PINS> {
+            /*impl<PINS> WriteIterRead for I2c<$I2CX, PINS> {
                 type Error = Error;
                 fn try_write_iter_read<B>(
                     &mut self,
@@ -348,7 +455,7 @@ macro_rules! hal {
                     self.try_read(address, buffer)?;
                     Ok(())
                 }
-            }
+            }*/
         )+
     }
 }
