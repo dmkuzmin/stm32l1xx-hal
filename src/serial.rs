@@ -161,8 +161,6 @@ pub struct Config {
     parity: Parity,
     stopbits: StopBits,
     oversampling: Oversampling,
-    character_match: Option<u8>,
-    receiver_timeout: Option<u32>,
 }
 
 impl Config {
@@ -201,21 +199,6 @@ impl Config {
         self.oversampling = oversampling;
         self
     }
-
-    /// Set the character match character
-    pub fn character_match(mut self, character_match: u8) -> Self {
-        self.character_match = Some(character_match);
-        self
-    }
-
-    /// Set the receiver timeout, the value is the number of bit durations
-    ///
-    /// Note that it only takes 24 bits, using more than this will cause a panic.
-    pub fn receiver_timeout(mut self, receiver_timeout: u32) -> Self {
-        assert!(receiver_timeout < 1 << 24);
-        self.receiver_timeout = Some(receiver_timeout);
-        self
-    }
 }
 
 impl Default for Config {
@@ -226,8 +209,6 @@ impl Default for Config {
             parity: Parity::ParityNone,
             stopbits: StopBits::STOP1,
             oversampling: Oversampling::Over16,
-            character_match: None,
-            receiver_timeout: None,
         }
     }
 }
@@ -357,11 +338,6 @@ macro_rules! hal {
                     };
                     usart.cr2.modify(|_r, w| {
                         unsafe { w.stop().bits(stop_bits) };
-
-                        // Setup character match (if requested)
-                        if let Some(c) = config.character_match {
-                            unsafe { w.add().bits(c) };
-                        }
 
                         w
                     });
