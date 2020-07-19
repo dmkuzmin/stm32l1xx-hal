@@ -35,9 +35,11 @@ pub use crate::stm32::interrupt;
 mod bb;
 
 pub mod delay;
+pub mod dma;
 pub mod exti;
 pub mod gpio;
 pub mod i2c;
 pub mod prelude;
 pub mod rcc;
+pub mod serial;
 pub mod time;

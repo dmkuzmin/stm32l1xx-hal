@@ -24,7 +24,7 @@ pub enum MsiFreq {
     RANGE_4194000HZ = 6,
 }
 
-impl MsiFreq {
+/*impl MsiFreq {
     fn to_hertz(self) -> Hertz {
         Hertz(match self {
             Self::RANGE_65536HZ => 65_536,
@@ -36,7 +36,7 @@ impl MsiFreq {
             Self::RANGE_4194000HZ => 4_194_000,
         })
     }
-}
+}*/
 
 /// Extension trait that constrains the `RCC` peripheral
 pub trait RccExt {
@@ -295,7 +295,7 @@ impl CFGR {
     }
 
     /// Freezes the clock configuration, making it effective
-    pub fn freeze(&self/*, acr: &mut ACR*/) -> Clocks {
+    pub fn freeze(&self /*, acr: &mut ACR*/) -> Clocks {
         let rcc = unsafe { &*RCC::ptr() };
 
         //
@@ -356,8 +356,9 @@ impl CFGR {
         }
 
         if let Some(msi) = self.msi {
-            unsafe { rcc.icscr.modify(|_, w| w.msirange().bits(msi as u8)) };
-            unsafe { rcc.cr.modify(|_, w| w.msion().set_bit()) };
+            rcc.icscr
+                .modify(|_, w| unsafe { w.msirange().bits(msi as u8) });
+            rcc.cr.modify(|_, w| w.msion().set_bit());
 
             // Wait until MSI is running
             while rcc.cr.read().msirdy().bit_is_clear() {}
@@ -399,7 +400,8 @@ impl CFGR {
         }
 
         let pllconf = if self.pll_config.is_none() {
-            if let Some(sysclk) = self.sysclk {
+            //if let Some(sysclk) = self.sysclk {
+            if let Some(_) = self.sysclk {
                 // Calculate PLL multiplier and create a best effort pll config, just multiply n
                 //let plln = (2 * sysclk) / clock_speed;
 

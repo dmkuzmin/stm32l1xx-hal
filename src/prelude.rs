@@ -1,5 +1,6 @@
 pub use hal::prelude::*;
 
+pub use crate::dma::DmaExt as _stm32l1xx_hal_dma_DmaExt;
 pub use crate::exti::ExtiExt as _stm32l1xx_hal_exti_ExtiExt;
 pub use crate::gpio::GpioExt as _stm32l1xx_hal_gpio_GpioExt;
 pub use crate::rcc::RccExt as _stm32l1xx_hal_rcc_RccExt;

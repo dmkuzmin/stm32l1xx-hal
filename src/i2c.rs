@@ -1,12 +1,10 @@
 //! Inter-Integrated Circuit (I2C) bus
 
-use crate::stm32::{I2C1, I2C2};
-use cast::u8;
-
 use crate::gpio::gpiob::{PB10, PB11, PB6, PB7, PB8, PB9};
 use crate::gpio::{Alternate, OpenDrain, Output, AF4};
 use crate::hal::blocking::i2c::{Read, Write, WriteRead};
 use crate::rcc::{Clocks, APB1};
+use crate::stm32::{I2C1, I2C2};
 use crate::time::Hertz;
 
 /// I2C error
@@ -184,14 +182,14 @@ macro_rules! hal {
                     } {}
 
                     // clear POS and set ACK, START bits
-                    self.i2c.cr1.modify(|_, w| unsafe {
+                    self.i2c.cr1.modify(|_, w|
                         w.pos()
                             .clear_bit()
                             .ack()
                             .set_bit()
                             .start()
                             .set_bit()
-                    });
+                    );
 
                     // Wait until START condition was generated
                     busy_wait!(self.i2c, sb);
@@ -341,12 +339,12 @@ macro_rules! hal {
                     } {}
 
                     // Send a START condition
-                    self.i2c.cr1.modify(|_, w| unsafe {
+                    self.i2c.cr1.modify(|_, w|
                         w.pos()
                             .clear_bit()
                             .start()
                             .set_bit()
-                    });
+                    );
 
                     // Wait until START condition was generated
                     busy_wait!(self.i2c, sb);
