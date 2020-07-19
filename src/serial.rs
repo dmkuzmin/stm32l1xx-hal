@@ -419,24 +419,12 @@ macro_rules! hal {
                     let sr = unsafe { (*$USARTX::ptr()).sr.read() };
 
                     Err(if sr.pe().bit_is_set() {
-                        unsafe {
-                            ptr::read_volatile(&(*$USARTX::ptr()).dr as *const _ as *const _)
-                        }
                         nb::Error::Other(Error::Parity)
                     } else if sr.fe().bit_is_set() {
-                        unsafe {
-                            ptr::read_volatile(&(*$USARTX::ptr()).dr as *const _ as *const _)
-                        }
                         nb::Error::Other(Error::Framing)
                     } else if sr.nf().bit_is_set() {
-                        unsafe {
-                            ptr::read_volatile(&(*$USARTX::ptr()).dr as *const _ as *const _)
-                        }
                         nb::Error::Other(Error::Noise)
                     } else if sr.ore().bit_is_set() {
-                        unsafe {
-                            ptr::read_volatile(&(*$USARTX::ptr()).dr as *const _ as *const _)
-                        }
                         nb::Error::Other(Error::Overrun)
                     } else if sr.rxne().bit_is_set() {
                         // NOTE(read_volatile) see `write_volatile` below
