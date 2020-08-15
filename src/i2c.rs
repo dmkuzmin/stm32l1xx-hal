@@ -169,7 +169,7 @@ macro_rules! hal {
             impl<PINS> Read for I2c<$I2CX, PINS> {
                 type Error = Error;
 
-                fn try_read(
+                fn read(
                     &mut self,
                     address: u8,
                     buffer: &mut [u8]
@@ -326,7 +326,7 @@ macro_rules! hal {
             impl<PINS> Write for I2c<$I2CX, PINS> {
                 type Error = Error;
 
-                fn try_write(
+                fn write(
                     &mut self,
                     address: u8,
                     bytes: &[u8]
@@ -380,8 +380,8 @@ macro_rules! hal {
             /*impl<PINS> WriteIter for I2c<$I2CX, PINS> {
                 type Error = Error;
 
-                //fn try_write_iter<B>(
-                fn try_write<B>(
+                //fn write_iter<B>(
+                fn write<B>(
                     &mut self,
                     address: u8,
                     bytes: B
@@ -433,22 +433,22 @@ macro_rules! hal {
 
             impl<PINS> WriteRead for I2c<$I2CX, PINS> {
                 type Error = Error;
-                fn try_write_read(
+                fn write_read(
                     &mut self,
                     address: u8,
                     bytes: &[u8],
                     buffer: &mut [u8]
                 ) -> Result<(), Self::Error>
                 {
-                    self.try_write(address, bytes)?;
-                    self.try_read(address, buffer)?;
+                    self.write(address, bytes)?;
+                    self.read(address, buffer)?;
                     Ok(())
                 }
             }
 
             /*impl<PINS> WriteIterRead for I2c<$I2CX, PINS> {
                 type Error = Error;
-                fn try_write_iter_read<B>(
+                fn write_iter_read<B>(
                     &mut self,
                     address: u8,
                     bytes: B,
@@ -456,8 +456,8 @@ macro_rules! hal {
                 ) -> Result<(), Self::Error> where
                     B: IntoIterator<Item = u8>,
                 {
-                    self.try_write(address, bytes)?;
-                    self.try_read(address, buffer)?;
+                    self.write(address, bytes)?;
+                    self.read(address, buffer)?;
                     Ok(())
                 }
             }*/

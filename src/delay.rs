@@ -38,31 +38,31 @@ impl Delay {
 impl DelayMs<u32> for Delay {
     type Error = Error;
 
-    fn try_delay_ms(&mut self, ms: u32) -> Result<(), Error> {
-        self.try_delay_us(ms * 1_000)
+    fn delay_ms(&mut self, ms: u32) -> Result<(), Error> {
+        self.delay_us(ms * 1_000)
     }
 }
 
 impl DelayMs<u16> for Delay {
     type Error = Error;
 
-    fn try_delay_ms(&mut self, ms: u16) -> Result<(), Error> {
-        self.try_delay_ms(u32(ms))
+    fn delay_ms(&mut self, ms: u16) -> Result<(), Error> {
+        self.delay_ms(u32(ms))
     }
 }
 
 impl DelayMs<u8> for Delay {
     type Error = Error;
 
-    fn try_delay_ms(&mut self, ms: u8) -> Result<(), Error> {
-        self.try_delay_ms(u32(ms))
+    fn delay_ms(&mut self, ms: u8) -> Result<(), Error> {
+        self.delay_ms(u32(ms))
     }
 }
 
 impl DelayUs<u32> for Delay {
     type Error = Error;
 
-    fn try_delay_us(&mut self, us: u32) -> Result<(), Error> {
+    fn delay_us(&mut self, us: u32) -> Result<(), Error> {
         let t0 = DWT::get_cycle_count();
         let rvr = match us.checked_mul(self.clocks.sysclk().0 / 1_000_000) {
             Some(rvr) => rvr,
@@ -76,15 +76,15 @@ impl DelayUs<u32> for Delay {
 impl DelayUs<u16> for Delay {
     type Error = Error;
 
-    fn try_delay_us(&mut self, us: u16) -> Result<(), Error> {
-        self.try_delay_us(u32(us))
+    fn delay_us(&mut self, us: u16) -> Result<(), Error> {
+        self.delay_us(u32(us))
     }
 }
 
 impl DelayUs<u8> for Delay {
     type Error = Error;
 
-    fn try_delay_us(&mut self, us: u8) -> Result<(), Error> {
-        self.try_delay_us(u32(us))
+    fn delay_us(&mut self, us: u8) -> Result<(), Error> {
+        self.delay_us(u32(us))
     }
 }
