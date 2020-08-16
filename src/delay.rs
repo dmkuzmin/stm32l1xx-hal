@@ -6,13 +6,6 @@ use cortex_m::peripheral::DCB;
 use cortex_m::peripheral::DWT;
 use hal::blocking::delay::{DelayMs, DelayUs};
 
-/// Serial error
-#[derive(Debug)]
-pub enum Error {
-    /// Overflow error
-    Overflow,
-}
-
 /// Data Watchpoint and Trace unit timer (DWT) as a delay provider
 pub struct Delay {
     dcb: DCB,
@@ -36,55 +29,48 @@ impl Delay {
 }
 
 impl DelayMs<u32> for Delay {
-    type Error = Error;
 
-    fn delay_ms(&mut self, ms: u32) -> Result<(), Error> {
+    fn delay_ms(&mut self, ms: u32) {
         self.delay_us(ms * 1_000)
     }
 }
 
 impl DelayMs<u16> for Delay {
-    type Error = Error;
 
-    fn delay_ms(&mut self, ms: u16) -> Result<(), Error> {
+    fn delay_ms(&mut self, ms: u16) {
         self.delay_ms(u32(ms))
     }
 }
 
 impl DelayMs<u8> for Delay {
-    type Error = Error;
 
-    fn delay_ms(&mut self, ms: u8) -> Result<(), Error> {
+    fn delay_ms(&mut self, ms: u8) {
         self.delay_ms(u32(ms))
     }
 }
 
 impl DelayUs<u32> for Delay {
-    type Error = Error;
 
-    fn delay_us(&mut self, us: u32) -> Result<(), Error> {
+    fn delay_us(&mut self, us: u32) {
         let t0 = DWT::get_cycle_count();
         let rvr = match us.checked_mul(self.clocks.sysclk().0 / 1_000_000) {
             Some(rvr) => rvr,
-            None => return Err(Error::Overflow),
+            None => return,
         };
         while DWT::get_cycle_count().wrapping_sub(t0) < rvr {}
-        Ok(())
     }
 }
 
 impl DelayUs<u16> for Delay {
-    type Error = Error;
 
-    fn delay_us(&mut self, us: u16) -> Result<(), Error> {
+    fn delay_us(&mut self, us: u16) {
         self.delay_us(u32(us))
     }
 }
 
 impl DelayUs<u8> for Delay {
-    type Error = Error;
 
-    fn delay_us(&mut self, us: u8) -> Result<(), Error> {
+    fn delay_us(&mut self, us: u8) {
         self.delay_us(u32(us))
     }
 }
