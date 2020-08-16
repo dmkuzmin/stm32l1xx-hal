@@ -36,7 +36,7 @@ default-features = false
 version = "0.2.3"
 
 [dependencies.embedded-hal]
-# features = ["unproven"]
+features = ["unproven"]
 version = "0.2.4"
 
 [dependencies.void]
