@@ -170,7 +170,7 @@ macro_rules! gpio {
             use core::marker::PhantomData;
             use core::convert::Infallible;
 
-            use crate::hal::digital::{OutputPin, InputPin};
+            use crate::hal::digital::v2::{OutputPin, InputPin};
             use crate::stm32::{$gpioy, $GPIOX, EXTI, SYSCFG};
 
             use crate::rcc::{AHB, APB2};
@@ -619,11 +619,11 @@ macro_rules! gpio {
                 impl<MODE> InputPin for $PXi<Input<MODE>> {
                     type Error = Infallible;
 
-                    fn is_high(&self) -> Result<bool, Self::Error> {
-                        Ok(!self.is_low().unwrap())
+                    fn is_set_high(&self) -> Result<bool, Self::Error> {
+                        Ok(!self.is_set_low().unwrap())
                     }
 
-                    fn is_low(&self) -> Result<bool, Self::Error> {
+                    fn is_set_low(&self) -> Result<bool, Self::Error> {
                         // NOTE(unsafe) atomic read with no side effects
                         Ok(unsafe { (*$GPIOX::ptr()).idr.read().bits() & (1 << $i) == 0 })
                     }
