@@ -619,11 +619,11 @@ macro_rules! gpio {
                 impl<MODE> InputPin for $PXi<Input<MODE>> {
                     type Error = Infallible;
 
-                    fn is_set_high(&self) -> Result<bool, Self::Error> {
-                        Ok(!self.is_set_low().unwrap())
+                    fn is_high(&self) -> Result<bool, Self::Error> {
+                        Ok(!self.is_low().unwrap())
                     }
 
-                    fn is_set_low(&self) -> Result<bool, Self::Error> {
+                    fn is_low(&self) -> Result<bool, Self::Error> {
                         // NOTE(unsafe) atomic read with no side effects
                         Ok(unsafe { (*$GPIOX::ptr()).idr.read().bits() & (1 << $i) == 0 })
                     }
