@@ -557,6 +557,8 @@ impl CFGR {
         //     });
         // }
 
+        rcc.csr.modify(|_, w| unsafe { w.rtcsel().bits(0b10) });
+
         sysclk_src_bits = 0b00;
 
         // SW: HSI selected as system clock
