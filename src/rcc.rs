@@ -394,7 +394,7 @@ impl CFGR {
         };
 
         // Check if HSI should be started
-        if pll_source == PllSource::HSI16 || (self.msi.is_none() && self.hse.is_none()) {
+        if pll_source == PllSource::HSI16 || self.hse.is_none() {
             rcc.cr.write(|w| w.hsion().set_bit());
             while rcc.cr.read().hsirdy().bit_is_clear() {}
         }
@@ -539,10 +539,11 @@ impl CFGR {
             });
         } else {
             // use HSI as source
-            sysclk_src_bits = 0b01;
+            //sysclk_src_bits = 0b01;
+            sysclk_src_bits = 0b00;
 
-            rcc.cr.write(|w| w.hsion().set_bit());
-            while rcc.cr.read().hsirdy().bit_is_clear() {}
+            //rcc.cr.write(|w| w.hsion().set_bit());
+            //while rcc.cr.read().hsirdy().bit_is_clear() {}
 
             // SW: HSI selected as system clock
             rcc.cfgr.write(|w| unsafe {
@@ -564,9 +565,9 @@ impl CFGR {
         //
 
         // MSI always starts on reset
-        if self.msi.is_none() {
+        /*if self.msi.is_none() {
             rcc.cr.modify(|_, w| w.msion().clear_bit())
-        }
+        }*/
 
         //
         // 4. Clock setup done!
