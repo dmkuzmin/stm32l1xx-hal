@@ -557,6 +557,11 @@ impl CFGR {
         //     });
         // }
 
+        rcc.csr.modify(|_, w| w.lsion().set_bit());
+
+        // Wait until LSI is running
+        while rcc.csr.read().lsirdy().bit_is_clear() {}
+
         rcc.apb1enr.modify(|_r, w| w.pwren().set_bit());
         // Enable access to the backup registers
         let pwr = unsafe { &*PWR::ptr() };
