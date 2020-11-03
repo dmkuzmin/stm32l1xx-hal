@@ -9,7 +9,7 @@ pub trait PwrExt {
 }
 
 impl PwrExt for PWR {
-    fn constrain(self, apb1r1: &mut APB1R1) -> Pwr {
+    fn constrain(self) -> Pwr {
         Pwr {
             csr: CSR { _0: () },
         }

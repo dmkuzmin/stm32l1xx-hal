@@ -1,10 +1,10 @@
 //! Reset and Clock Control
 
 //use crate::flash::ACR;
-//use crate::pwr::Pwr;
-use crate::stm32::{rcc, RCC};
+use crate::stm32::{rcc, RCC, pwr, PWR};
 use crate::time::Hertz;
 use cast::u32;
+
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MsiFreq {
@@ -557,7 +557,12 @@ impl CFGR {
         //     });
         // }
 
+        rcc.apb1enr.modify(|_r, w| w.pwren().set_bit());
+        // Enable access to the backup registers
+        let pwr = unsafe { &*PWR::ptr() };
+        pwr.cr.modify(|_r, w| w.dbp().set_bit());
         rcc.csr.modify(|_, w| unsafe { w.rtcsel().bits(0b10) });
+        rcc.apb1enr.modify(|_r, w| w.lcden().set_bit());
 
         sysclk_src_bits = 0b00;
 
