@@ -491,72 +491,85 @@ impl CFGR {
         unsafe { acr.acr().write(|w| w.acc64().clear_bit()) }*/
 
         let sysclk_src_bits;
-        if let Some(pllconf) = pllconf {
-            // Sanity-checks per RM0394, 6.4.4 PLL configuration register (RCC_PLLCFGR)
-            //let r = pllconf.r.to_division_factor();
-            //let clock_speed = clock_speed / (pllconf.m as u32 + 1);
-            let vco = clock_speed * pllconf.pllmul.to_multiplication_factor();
-            let output_clock = vco / pllconf.plldiv.to_division_factor();
+        // if let Some(pllconf) = pllconf {
+        //     // Sanity-checks per RM0394, 6.4.4 PLL configuration register (RCC_PLLCFGR)
+        //     //let r = pllconf.r.to_division_factor();
+        //     //let clock_speed = clock_speed / (pllconf.m as u32 + 1);
+        //     let vco = clock_speed * pllconf.pllmul.to_multiplication_factor();
+        //     let output_clock = vco / pllconf.plldiv.to_division_factor();
 
-            assert!(clock_speed >= 2_000_000); // VCO input clock min
-            assert!(clock_speed <= 24_000_000); // VCO input clock max
-            assert!(vco >= 6_000_000); // VCO output min
-            assert!(vco <= 96_000_000); // VCO output max
-            assert!(output_clock <= 32_000_000); // Max output clock
+        //     assert!(clock_speed >= 2_000_000); // VCO input clock min
+        //     assert!(clock_speed <= 24_000_000); // VCO input clock max
+        //     assert!(vco >= 6_000_000); // VCO output min
+        //     assert!(vco <= 96_000_000); // VCO output max
+        //     assert!(output_clock <= 32_000_000); // Max output clock
 
-            // use PLL as source
-            sysclk_src_bits = 0b11;
-            rcc.cr.modify(|_, w| w.pllon().clear_bit());
-            while rcc.cr.read().pllrdy().bit_is_set() {}
+        //     // use PLL as source
+        //     sysclk_src_bits = 0b11;
+        //     rcc.cr.modify(|_, w| w.pllon().clear_bit());
+        //     while rcc.cr.read().pllrdy().bit_is_set() {}
 
-            let pllsrc_bit = pll_source.to_pllsrc();
+        //     let pllsrc_bit = pll_source.to_pllsrc();
 
-            rcc.cfgr.modify(|_, w| unsafe {
-                w.pllsrc()
-                    .bit(pllsrc_bit)
-                    .plldiv()
-                    .bits(pllconf.plldiv.to_bits())
-                    .pllmul()
-                    .bits(pllconf.pllmul.to_bits())
-            });
+        //     rcc.cfgr.modify(|_, w| unsafe {
+        //         w.pllsrc()
+        //             .bit(pllsrc_bit)
+        //             .plldiv()
+        //             .bits(pllconf.plldiv.to_bits())
+        //             .pllmul()
+        //             .bits(pllconf.pllmul.to_bits())
+        //     });
 
-            rcc.cr.modify(|_, w| w.pllon().set_bit());
+        //     rcc.cr.modify(|_, w| w.pllon().set_bit());
 
-            while rcc.cr.read().pllrdy().bit_is_clear() {}
+        //     while rcc.cr.read().pllrdy().bit_is_clear() {}
 
-            //rcc.pllcfgr.modify(|_, w| w.pllren().set_bit());
+        //     //rcc.pllcfgr.modify(|_, w| w.pllren().set_bit());
 
-            // SW: PLL selected as system clock
-            rcc.cfgr.modify(|_, w| unsafe {
-                w.ppre2()
-                    .bits(ppre2_bits)
-                    .ppre1()
-                    .bits(ppre1_bits)
-                    .hpre()
-                    .bits(hpre_bits)
-                    .sw()
-                    .bits(sysclk_src_bits)
-            });
-        } else {
-            // use HSI as source
-            //sysclk_src_bits = 0b01;
-            sysclk_src_bits = 0b00;
+        //     // SW: PLL selected as system clock
+        //     rcc.cfgr.modify(|_, w| unsafe {
+        //         w.ppre2()
+        //             .bits(ppre2_bits)
+        //             .ppre1()
+        //             .bits(ppre1_bits)
+        //             .hpre()
+        //             .bits(hpre_bits)
+        //             .sw()
+        //             .bits(sysclk_src_bits)
+        //     });
+        // } else {
+        //     // use HSI as source
+        //     sysclk_src_bits = 0b01;
 
-            //rcc.cr.write(|w| w.hsion().set_bit());
-            //while rcc.cr.read().hsirdy().bit_is_clear() {}
+        //     rcc.cr.write(|w| w.hsion().set_bit());
+        //     while rcc.cr.read().hsirdy().bit_is_clear() {}
 
-            // SW: HSI selected as system clock
-            rcc.cfgr.write(|w| unsafe {
-                w.ppre2()
-                    .bits(ppre2_bits)
-                    .ppre1()
-                    .bits(ppre1_bits)
-                    .hpre()
-                    .bits(hpre_bits)
-                    .sw()
-                    .bits(sysclk_src_bits)
-            });
-        }
+        //     // SW: HSI selected as system clock
+        //     rcc.cfgr.write(|w| unsafe {
+        //         w.ppre2()
+        //             .bits(ppre2_bits)
+        //             .ppre1()
+        //             .bits(ppre1_bits)
+        //             .hpre()
+        //             .bits(hpre_bits)
+        //             .sw()
+        //             .bits(sysclk_src_bits)
+        //     });
+        // }
+
+        sysclk_src_bits = 0b00;
+
+        // SW: HSI selected as system clock
+        rcc.cfgr.write(|w| unsafe {
+            w.ppre2()
+                .bits(ppre2_bits)
+                .ppre1()
+                .bits(ppre1_bits)
+                .hpre()
+                .bits(hpre_bits)
+                .sw()
+                .bits(sysclk_src_bits)
+        });
 
         while rcc.cfgr.read().sws().bits() != sysclk_src_bits {}
 
